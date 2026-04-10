@@ -1,0 +1,25 @@
+# --- Core AI Engineering & Diff Programming ---
+jax[cpu]>=0.4.0         # Das Herzstück: Autodiff und XLA
+jaxlib>=0.4.0           # Library-Support für JAX
+equinox>=0.10.0         # JAX-Library für NNs (basiert auf Pytrees, ideal für dein Projekt)
+
+# --- Electrical Engineering & Validation ---
+pandapower>=2.14.0      # Dein Referenz-Framework für die Validierung
+numpy<2.0.0             # Numerik-Basis (Version < 2.0 wegen Kompatibilität zu pandapower)
+
+# --- Data Science & Analysis ---
+pandas>=2.0.0           # Datenhandling für Zeitreihen (Wetterdaten)
+scipy>=1.10.0           # Für zusätzliche numerische Hilfsfunktionen
+
+# --- Visualization & Plotting ---
+matplotlib>=3.7.0       # Standard für alle Grafiken in der Bachelorarbeit
+seaborn>=0.12.0         # Für schicke Heatmaps (Sensitivitätsanalysen)
+networkx>=3.0           # Visualisierung von Graphen/Netztopologien
+
+# --- Development & Notebooks ---
+ipykernel               # Ermöglicht das Ausführen von Jupyter Notebooks in VS Code
+tqdm                    # Fortschrittsbalken für längere 
+
+# --- Testing ---
+pytest
+pytest-cov

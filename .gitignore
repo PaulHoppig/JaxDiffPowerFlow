@@ -1,0 +1,189 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+develop-eggs/
+downloads/
+parts/
+sdist/
+var/
+lib/
+lib64/
+*.manifest
+*.spec
+
+# ---------------------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# uv / hatch / poetry
+.uv/
+.hatch/
+.pdm-python
+.pdm.toml
+poetry.lock
+uv.lock
+
+# ---------------------------------------------------------------------------
+# Testing & coverage
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+*.cover
+.hypothesis/
+
+# ---------------------------------------------------------------------------
+# Type checkers & linters
+# ---------------------------------------------------------------------------
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# ---------------------------------------------------------------------------
+# JAX / ML
+# ---------------------------------------------------------------------------
+# JAX-Kompilierungs-Cache (falls jax_compilation_cache_dir gesetzt ist)
+jax_cache/
+.jax_cache/
+
+# Model-Checkpoints und trainierte Gewichte
+*.eqx
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+checkpoints/
+runs/
+wandb/
+mlruns/
+lightning_logs/
+
+# TensorBoard
+events.out.tfevents.*
+
+# ---------------------------------------------------------------------------
+# Notebooks
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+# Jupyter Notebook Output stripping wird über pre-commit (nbstripout) gemacht;
+# Notebooks selbst bleiben versioniert.
+profile_default/
+ipython_config.py
+
+# ---------------------------------------------------------------------------
+# Experiment-Outputs
+# ---------------------------------------------------------------------------
+# Generierte Plots, Logs, Zwischenergebnisse aus experiments/
+# -> für die Arbeit relevante Figures bitte explizit nach docs/figures/ kopieren
+outputs/
+results/
+logs/
+*.log
+*.csv.tmp
+
+# Rohdaten / große Dateien, die nicht ins Repo gehören
+data/raw/
+data/interim/
+data/external/
+*.h5
+*.hdf5
+*.parquet
+*.nc
+
+# ---------------------------------------------------------------------------
+# Editoren / IDEs
+# ---------------------------------------------------------------------------
+# VS Code — Workspace-Einstellungen bleiben lokal, geteilte Configs
+# (z. B. .vscode/extensions.json) können bei Bedarf mit ! ausgenommen werden.
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+.#*
+\#*\#
+
+# ---------------------------------------------------------------------------
+# Betriebssystem
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------------------------------------------------------------------------
+# Secrets / lokale Konfiguration
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.toml
+config.local.*
+
+# ---------------------------------------------------------------------------
+# Dokumentation (Build-Output)
+# ---------------------------------------------------------------------------
+docs/_build/
+docs/.doctrees/
+site/
+
+# LaTeX (falls Thesis im selben Repo gebaut wird)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot

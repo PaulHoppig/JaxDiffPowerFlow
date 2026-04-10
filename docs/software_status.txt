@@ -1,0 +1,161 @@
+Aktueller Softwarestand von diffpf
+Stand: 2026-04-10
+
+1. Projektziel
+diffpf ist ein differentiierbarer AC-Leistungsflusskern in JAX fuer ein stationaeres 3-Bus-Netz.
+Der Fokus liegt auf End-to-End-Differenzierung ueber Modellgrenzen hinweg, z. B.:
+Wetter -> PV-Modell -> PV-Einspeisung -> AC-Power-Flow -> Netzgroessen.
+
+2. Methodische Entscheidungen
+- Rechteckige Spannungsdarstellung: V = Vr + j Vi
+- Intern komplexe AC-Physik, aber reeller Zustandsvektor fuer den Solver
+- Per-Unit-System durchgaengig
+- Newton-Raphson als innerer Solver
+- JAX-kompatible, funktionale Implementierung
+- Topologie statisch, Parameter und Zustaende differenzierbar
+
+3. Derzeit implementierte Module
+- src/diffpf/core/types.py
+  Enthält die zentralen Datentypen:
+  BusSpec, LineSpec, NetworkSpec, CompiledTopology, NetworkParams, PFState.
+- src/diffpf/core/units.py
+  Enthält BaseValues fuer Per-Unit-Konvertierungen.
+- src/diffpf/core/ybus.py
+  Baut Y_bus fuer Pi-Leitungen per Stamping auf.
+- src/diffpf/core/residuals.py
+  Enthält:
+  state_to_voltage()
+  calc_power_injection()
+  power_flow_residual()
+  residual_loss()
+- src/diffpf/compile/network.py
+  Ueberfuehrt NetworkSpec in CompiledTopology + NetworkParams.
+- src/diffpf/io/reader.py
+  Liest und validiert JSON-Netzdefinitionen.
+- src/diffpf/io/parser.py
+  Wandelt RawNetwork in JAX-faehige Strukturen um und erzeugt einen Flat-Start.
+- src/diffpf/solver/newton.py
+  Enthält einen gedämpften Newton-Raphson-Solver auf Basis von jax.lax.while_loop.
+  Zusaetzlich gibt es jetzt NewtonResult mit:
+  solution, residual_norm, loss, iterations, converged.
+- src/diffpf/validation/finite_diff.py
+  Enthält einen einfachen zentralen Finite-Difference-Helfer.
+- src/diffpf/validation/pandapower_ref.py
+  Enthält die Referenzvalidierung gegen pandapower.
+
+4. Daten- und API-Design
+- Menschenfreundliche Eingabe:
+  JSON-Datei in cases/three_bus_poc.json
+- Interne Repräsentation:
+  CompiledTopology = statische Topologie
+  NetworkParams = differenzierbare physikalische Parameter
+  PFState = differenzierbarer rechteckiger Spannungszustand
+- Wichtige Invariante:
+  core/ bleibt frei von Parser-/JSON-Logik
+- JAX-Pytrees:
+  CompiledTopology trennt statische meta_fields von differentiierbaren data_fields
+
+5. Aktueller Anwendungsfall
+Das PoC-Netz besteht aus:
+- Bus 0: Slack / Umspannwerk
+- Bus 1: Wohngebiet / Last
+- Bus 2: PV-Park
+
+Netzelemente in V1:
+- PQ-Busse
+- Slack-Bus
+- Pi-Leitungen mit Serienimpedanz und Shunt-Suszeptanz
+- bekannte P- und Q-Einspeisungen
+
+Noch nicht implementiert:
+- PV-Bus-Gleichungen
+- Transformatoren
+- custom_root / implizite Differenzierung
+- Backtracking / robuste Linesearch
+- Pipeline-Module fuer Wetter -> PV -> Netz
+- physikalisches PV-Modell
+- NN-PV-Modell
+
+6. Experiment 1: Validierung gegen pandapower
+Experiment 1 ist implementiert in:
+- experiments/exp01_validate_pandapower.py
+- src/diffpf/validation/pandapower_ref.py
+- tests/test_pandapower_validation.py
+
+Verglichene Groessen:
+- Konvergenz ja/nein
+- Anzahl Iterationen
+- Residualnorm
+- Knotenspannungsbetraege
+- Spannungswinkel
+- Netzverluste
+- Leitungsfluesse
+
+Verwendete Betriebspunkte:
+- low_pv
+- medium_pv
+- high_pv
+
+Ergebnis:
+Der JAX-Kern stimmt fuer alle drei Betriebspunkte numerisch praktisch exakt mit pandapower ueberein.
+Typische Abweichungen liegen nur im Bereich des numerischen Rundungsrauschens.
+
+Beobachtete Groessenordnung der Abweichungen:
+- Max |dV| bis etwa 1e-12 p.u.
+- Max |dtheta| bis etwa 1e-12 deg
+- |dP_loss| bis etwa 1e-13 MW
+- Max |dP_line| bis etwa 1e-11 MW
+- Max |dQ_line| bis etwa 1e-11 MVAR
+
+Interpretation:
+Die numerische Formulierung des stationaeren AC-Power-Flow-Kerns ist fuer das betrachtete 3-Bus-PoC validiert.
+
+7. Teststatus
+Lokaler Stand:
+- pytest -q erfolgreich
+- 52 Tests bestanden
+
+Abgedeckte Bereiche:
+- Y_bus
+- Residuen
+- Newton-Solver
+- JSON-Reader und Parser
+- Referenzvergleich gegen pandapower
+
+8. Bekannte technische Schulden / Aufraeumpunkte
+- Alte Kompatibilitaets-Shims in src/diffpf/models/ und src/diffpf/numerics/ sind noch vorhanden.
+- In tests/ liegen teils migrierte Altdateien, die laut Dokumentation spaeter entfernt oder konsolidiert werden koennen.
+- docs/theory.md existiert noch nicht.
+- Es gibt noch keine STATUS-Datei fuer die Projektphasen; diese Datei ist derzeit der kompakteste Snapshot.
+
+9. Sinnvolle naechste Implementierungsschritte
+Kurzfristig:
+- solver/implicit.py mit jax.lax.custom_root aufsetzen
+- Gradiententests fuer den impliziten Solver gegen Finite Differences ergaenzen
+- Experiment 2 fuer Gradientenvalidierung implementieren
+
+Danach:
+- models/pv_physical.py implementieren
+- pipeline/weather_to_pf.py aufbauen
+- Sensitivitaeten Wetter -> Netzgroessen berechnen
+
+Spaeter:
+- Austauschbares PV-NN-Modell mit gleicher Grid-Core-Schnittstelle
+- Inverse Auslegung der PV-Flaeche unter Spannungsgrenzen
+
+10. Offene Designfragen fuer die naechsten Chats
+- Welche API soll solver/implicit.py genau bekommen?
+  Option A: solve_power_flow_implicit(topology, params, initial_state, options)
+  Option B: allgemeiner custom_root-Wrapper um residual/operator-Funktionen
+- Soll NewtonResult auch den finalen Spannungsvektor und eine Konvergenzhistorie enthalten?
+- Wie strikt soll V1 auf PQ + Slack begrenzt bleiben, bevor PV-Busse eingefuehrt werden?
+- Soll das PV-Modell bereits in physikalischen Einheiten arbeiten und erst in der Pipeline nach p.u. umgerechnet werden?
+- Wie sollen Outputs der Pipeline standardisiert werden:
+  nur Spannungen oder auch Slack-Leistung, Leitungsfluesse, Verluste und Constraints?
+
+11. Wichtig fuer weitere Entwicklung
+- Keine stillen methodischen Aenderungen an Residuenformulierung oder Koordinatenwahl.
+- pandapower nur in validation/ und Tests verwenden.
+- core/, solver/ und pipeline/ muessen jit-kompatibel bleiben.
+- Neue Kernfunktionen sollten immer mit Tests eingefuehrt werden.
+

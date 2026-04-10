@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python -m pytest tests/ -x -q)",
+      "Bash(.venv/Scripts/python -c ':*)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)",
+      "Read(//c/Users/Paul/.claude/projects/C--Users-Paul-Documents-TH-Koeln-Bachelor-Bachelorarbeit-jax-diff-powerflow/memory//**)",
+      "Read(//c/Users/Paul/.claude/projects/C--Users-Paul-Documents-TH-Koeln-Bachelor-Bachelorarbeit-jax-diff-powerflow/memory/**)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/)"
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffpf"
+version = "0.1.0"
+description = "Differenzierbarer AC-Leistungsflusskern in JAX"
+requires-python = ">=3.10"
+dependencies = [
+    "jax",
+    "jaxlib",
+    "equinox",
+    "pandapower",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "ruff",
+    "black",
+    "pre-commit",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+# Pakete aus src/ und cases/ ohne sys.path-Hack im conftest auffindbar machen.
+pythonpath = ["src", "."]
+testpaths  = ["tests"]
+addopts    = "-v --tb=short"
+
+# ---------------------------------------------------------------------------
+# Ruff (Linter)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+src        = ["src"]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+# ---------------------------------------------------------------------------
+# Black (Formatter)
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length    = 88
+target-version = ["py310"]
