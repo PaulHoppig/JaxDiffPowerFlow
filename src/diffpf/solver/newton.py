@@ -27,8 +27,8 @@ class NewtonResult:
     solution: PFState
     residual_norm: jnp.ndarray
     loss: jnp.ndarray
-    iterations: int
-    converged: bool
+    iterations: jnp.ndarray
+    converged: jnp.ndarray
 
 
 def _residual_from_vector(
@@ -94,6 +94,6 @@ def solve_power_flow_result(
         solution=PFState.from_vector(solution_vector, n_var),
         residual_norm=residual_norm,
         loss=loss,
-        iterations=int(iterations),
-        converged=bool(residual_norm <= options.tolerance),
+        iterations=iterations,
+        converged=residual_norm <= options.tolerance,
     )

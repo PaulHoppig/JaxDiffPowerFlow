@@ -12,6 +12,7 @@ from .residuals import (
     residual_loss,
     state_to_voltage,
 )
+from .observables import PowerFlowObservables, power_flow_observables
 from .types import (
     BusSpec,
     CompiledTopology,
@@ -39,4 +40,6 @@ __all__ = [
     "calc_power_injection",
     "power_flow_residual",
     "residual_loss",
+    "PowerFlowObservables",
+    "power_flow_observables",
 ]

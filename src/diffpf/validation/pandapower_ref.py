@@ -10,7 +10,6 @@ import numpy as np
 import pandapower as pp
 
 from diffpf.core import BaseValues, build_ybus, calc_power_injection, state_to_voltage
-from diffpf.core.types import PFState
 from diffpf.io import load_json
 from diffpf.io.reader import RawNetwork
 from diffpf.solver import NewtonOptions, solve_power_flow_result
@@ -240,8 +239,6 @@ def solve_with_pandapower(raw: RawNetwork) -> PandapowerResult:
     voltage_mag = net.res_bus.loc[ordered_bus_indices, "vm_pu"].to_numpy(dtype=float)
     voltage_ang = net.res_bus.loc[ordered_bus_indices, "va_degree"].to_numpy(dtype=float)
 
-    slack_bus_id = next(bus.id for bus in raw.buses if bus.type == "slack")
-    slack_pp_idx = bus_lookup[slack_bus_id]
     ext_grid_row = net.res_ext_grid.iloc[0]
 
     flows: list[LineFlowResult] = []
