@@ -8,7 +8,7 @@ from JAX array construction (parser).
   parser.py  :  RawNetwork → (CompiledTopology, NetworkParams, PFState)
 """
 
-from .parser import load_network, parse
+from .parser import line_to_pu, load_network, parse
 from .reader import RawNetwork, load_json
 
 __all__ = [

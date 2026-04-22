@@ -5,7 +5,8 @@
   },
   "base": {
     "s_mva": 1.0,
-    "v_kv":  0.4
+    "v_kv":  0.4,
+    "f_hz":  50.0
   },
   "buses": [
     {
@@ -36,27 +37,27 @@
       "name":       "umspannwerk__wohngebiet",
       "from_bus":   0,
       "to_bus":     1,
-      "r_pu":       0.02,
-      "x_pu":       0.04,
-      "b_shunt_pu": 0.02
+      "r_ohm":      0.0032,
+      "x_ohm":      0.0064,
+      "b_shunt_s":  0.125
     },
     {
       "id":         1,
       "name":       "wohngebiet__pv_park",
       "from_bus":   1,
       "to_bus":     2,
-      "r_pu":       0.015,
-      "x_pu":       0.03,
-      "b_shunt_pu": 0.015
+      "r_ohm":      0.0024,
+      "x_ohm":      0.0048,
+      "b_shunt_s":  0.09375
     },
     {
       "id":         2,
       "name":       "umspannwerk__pv_park",
       "from_bus":   0,
       "to_bus":     2,
-      "r_pu":       0.03,
-      "x_pu":       0.06,
-      "b_shunt_pu": 0.01
+      "r_ohm":      0.0048,
+      "x_ohm":      0.0096,
+      "b_shunt_s":  0.0625
     }
   ]
 }

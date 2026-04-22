@@ -71,7 +71,7 @@ def test_load_json_duplicate_bus_id_raises(tmp_path):
     }
     p = tmp_path / "bad.json"
     p.write_text(json.dumps(bad))
-    with pytest.raises(ValueError, match="Duplicate bus IDs"):
+    with pytest.raises(ValueError, match="[Dd]uplikat|[Dd]uplicate|[Dd]oppelte"):
         load_json(p)
 
 
@@ -86,7 +86,7 @@ def test_load_json_no_slack_raises(tmp_path):
     }
     p = tmp_path / "bad.json"
     p.write_text(json.dumps(bad))
-    with pytest.raises(ValueError, match="slack bus"):
+    with pytest.raises(ValueError, match="[Ss]lack"):
         load_json(p)
 
 
@@ -98,12 +98,12 @@ def test_load_json_zero_impedance_line_raises(tmp_path):
             {"id": 1, "name": "load", "type": "pq"},
         ],
         "lines": [
-            {"id": 0, "from_bus": 0, "to_bus": 1, "r_pu": 0.0, "x_pu": 0.0}
+            {"id": 0, "from_bus": 0, "to_bus": 1, "r_ohm": 0.0, "x_ohm": 0.0}
         ],
     }
     p = tmp_path / "bad.json"
     p.write_text(json.dumps(bad))
-    with pytest.raises(ValueError, match="impedance"):
+    with pytest.raises(ValueError, match="[Ii]mpedanz|[Ii]mpedance"):
         load_json(p)
 
 
@@ -164,8 +164,8 @@ def test_load_network_non_contiguous_ids_remap_correctly(tmp_path):
             {"id": 30, "name": "pv",    "type": "pq", "p_mw": 0.3,  "q_mvar": 0.0},
         ],
         "lines": [
-            {"id": 0, "from_bus": 10, "to_bus": 20, "r_pu": 0.02, "x_pu": 0.04},
-            {"id": 1, "from_bus": 10, "to_bus": 30, "r_pu": 0.03, "x_pu": 0.06},
+            {"id": 0, "from_bus": 10, "to_bus": 20, "r_ohm": 0.02, "x_ohm": 0.04},
+            {"id": 1, "from_bus": 10, "to_bus": 30, "r_ohm": 0.03, "x_ohm": 0.06},
         ],
     }
     p = tmp_path / "nc.json"
@@ -186,3 +186,209 @@ def test_load_network_roundtrip_with_solver():
         topology, params, state, NewtonOptions(max_iters=30, tolerance=1e-10)
     )
     assert float(norm) < 1e-8
+
+
+# ---------------------------------------------------------------------------
+# Neue Tests: physikalische Leitungsparameter (Form A + Form B)
+# ---------------------------------------------------------------------------
+
+# Hilfsfunktion: minimales 2-Bus-Netz als Dict konstruieren
+def _two_bus_net(line_dict: dict, base_extra: dict | None = None) -> dict:
+    base = {"s_mva": 1.0, "v_kv": 0.4}
+    if base_extra:
+        base.update(base_extra)
+    return {
+        "base": base,
+        "buses": [
+            {"id": 0, "name": "slack", "type": "slack"},
+            {"id": 1, "name": "load",  "type": "pq", "p_mw": -0.5, "q_mvar": -0.1},
+        ],
+        "lines": [{"id": 0, "from_bus": 0, "to_bus": 1, **line_dict}],
+    }
+
+
+# ---- Form A ----------------------------------------------------------------
+
+
+def test_form_a_parses_without_error(tmp_path):
+    """Form A (r_ohm, x_ohm) muss ohne Fehler geladen werden."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({"r_ohm": 0.032, "x_ohm": 0.064})))
+    raw = load_json(p)
+    assert raw.lines[0].r_ohm == pytest.approx(0.032)
+    assert raw.lines[0].x_ohm == pytest.approx(0.064)
+    assert raw.lines[0].b_shunt_s is None  # optional, nicht angegeben
+
+
+def test_form_a_pu_conversion_exact(tmp_path):
+    """
+    Form A: r_ohm=0.032 Ω, x_ohm=0.064 Ω, b_shunt_s=0.625 S
+    mit S_base=1 MVA, V_base=0.4 kV  →  Z_base=0.16 Ω, Y_base=6.25 S
+    →  r_pu=0.2, x_pu=0.4, b_shunt_pu=0.1
+    """
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net(
+        {"r_ohm": 0.032, "x_ohm": 0.064, "b_shunt_s": 0.625}
+    )))
+    _, params, _ = load_network(p)
+    np.testing.assert_allclose(float(params.g_series_pu[0]),
+                               np.real(1.0 / complex(0.2, 0.4)), rtol=1e-10)
+    np.testing.assert_allclose(float(params.b_shunt_pu[0]), 0.1, rtol=1e-10)
+
+
+def test_form_a_b_shunt_defaults_to_zero(tmp_path):
+    """Form A ohne b_shunt_s → b_shunt_pu == 0."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({"r_ohm": 0.01, "x_ohm": 0.02})))
+    _, params, _ = load_network(p)
+    assert float(params.b_shunt_pu[0]) == pytest.approx(0.0)
+
+
+# ---- Form B mit b_shunt_s_per_km -------------------------------------------
+
+
+def test_form_b_b_shunt_s_per_km_parses_and_converts(tmp_path):
+    """
+    Form B mit b_shunt_s_per_km:
+      length=0.2 km, r=0.16 Ω/km, x=0.32 Ω/km, b_shunt=0.625 S/km
+      → r_total=0.032 Ω, x_total=0.064 Ω, b_total=0.125 S
+      → r_pu=0.2, x_pu=0.4, b_shunt_pu=0.02
+    """
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({
+        "length_km": 0.2,
+        "r_ohm_per_km": 0.16,
+        "x_ohm_per_km": 0.32,
+        "b_shunt_s_per_km": 0.625,
+    })))
+    _, params, _ = load_network(p)
+    # r_pu = 0.032 / 0.16 = 0.2
+    np.testing.assert_allclose(
+        float(params.g_series_pu[0]),
+        np.real(1.0 / complex(0.2, 0.4)),
+        rtol=1e-10,
+    )
+    # b_shunt_pu = 0.125 * 0.16 = 0.02
+    np.testing.assert_allclose(float(params.b_shunt_pu[0]), 0.02, rtol=1e-10)
+
+
+def test_form_b_no_shunt_defaults_to_zero(tmp_path):
+    """Form B ohne Shunt-Angabe → b_shunt_pu == 0."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({
+        "length_km": 0.1,
+        "r_ohm_per_km": 0.2,
+        "x_ohm_per_km": 0.1,
+    })))
+    _, params, _ = load_network(p)
+    assert float(params.b_shunt_pu[0]) == pytest.approx(0.0)
+
+
+# ---- Form B mit c_nf_per_km ------------------------------------------------
+
+
+def test_form_b_c_nf_per_km_converts_correctly(tmp_path):
+    """
+    Form B mit c_nf_per_km:
+      f=50 Hz, C=200 nF/km, length=1 km
+      b_total = 2π·50·200e-9·1 = 6.2832e-5 S
+      b_pu = 6.2832e-5 · 0.16 = 1.00531e-5
+    """
+    import math as _math
+    f, c_nf, L = 50.0, 200.0, 1.0
+    b_s_expected = 2.0 * _math.pi * f * c_nf * 1e-9 * L
+    b_pu_expected = b_s_expected * 0.16   # × Z_base
+
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net(
+        {"length_km": L, "r_ohm_per_km": 0.1, "x_ohm_per_km": 0.05,
+         "c_nf_per_km": c_nf},
+        base_extra={"f_hz": f},
+    )))
+    _, params, _ = load_network(p)
+    np.testing.assert_allclose(float(params.b_shunt_pu[0]), b_pu_expected, rtol=1e-10)
+
+
+def test_form_b_c_nf_requires_f_hz(tmp_path):
+    """c_nf_per_km ohne base.f_hz muss ValueError auslösen."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net(
+        {"length_km": 1.0, "r_ohm_per_km": 0.1, "x_ohm_per_km": 0.05,
+         "c_nf_per_km": 200.0},
+        # kein f_hz in base
+    )))
+    with pytest.raises(ValueError, match="f_hz"):
+        load_json(p)
+
+
+# ---- Fehlerhafte Eingaben --------------------------------------------------
+
+
+def test_mixed_form_raises(tmp_path):
+    """Form A und Form B gleichzeitig → ValueError."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({
+        "r_ohm": 0.01,
+        "x_ohm": 0.02,
+        "length_km": 0.1,          # Form B
+        "r_ohm_per_km": 0.1,
+        "x_ohm_per_km": 0.05,
+    })))
+    with pytest.raises(ValueError, match="[Mm]isch"):
+        load_json(p)
+
+
+def test_no_form_raises(tmp_path):
+    """Weder Form A noch Form B → ValueError."""
+    p = tmp_path / "net.json"
+    # Leitung hat nur Topologie, keine Parameter
+    p.write_text(json.dumps(_two_bus_net({})))
+    with pytest.raises(ValueError):
+        load_json(p)
+
+
+def test_form_b_both_shunt_specs_raises(tmp_path):
+    """b_shunt_s_per_km und c_nf_per_km gleichzeitig → ValueError."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net(
+        {"length_km": 1.0, "r_ohm_per_km": 0.1, "x_ohm_per_km": 0.05,
+         "b_shunt_s_per_km": 0.01, "c_nf_per_km": 200.0},
+        base_extra={"f_hz": 50.0},
+    )))
+    with pytest.raises(ValueError, match="c_nf_per_km"):
+        load_json(p)
+
+
+def test_form_b_zero_impedance_after_expansion_raises(tmp_path):
+    """Beläge > 0, aber length_km = 0 ist verboten (length_km > 0 Pflicht)."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({
+        "length_km": 0.0,    # ungültig
+        "r_ohm_per_km": 0.1,
+        "x_ohm_per_km": 0.05,
+    })))
+    with pytest.raises(ValueError, match="length_km"):
+        load_json(p)
+
+
+def test_form_b_zero_per_km_values_raises(tmp_path):
+    """r_ohm_per_km=0, x_ohm_per_km=0 → Nullimpedanz nach Expansion."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net({
+        "length_km": 1.0,
+        "r_ohm_per_km": 0.0,
+        "x_ohm_per_km": 0.0,
+    })))
+    with pytest.raises(ValueError, match="[Ii]mpedanz|[Ii]mpedance"):
+        load_json(p)
+
+
+def test_base_f_hz_validation(tmp_path):
+    """base.f_hz <= 0 muss abgelehnt werden."""
+    p = tmp_path / "net.json"
+    p.write_text(json.dumps(_two_bus_net(
+        {"r_ohm": 0.01, "x_ohm": 0.02},
+        base_extra={"f_hz": -1.0},
+    )))
+    with pytest.raises(ValueError, match="f_hz"):
+        load_json(p)

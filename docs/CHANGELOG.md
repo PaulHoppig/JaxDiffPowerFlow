@@ -3,6 +3,52 @@
 Dieses Dokument fasst die bisher umgesetzten Entwicklungsschritte im Projekt `diffpf`
 zusammen, inklusive der Parser-Schicht und der bisher realisierten Experimente.
 
+## 2026-04-22 - Refaktorierung: Physikalische Leitungsparameter im JSON-Eingabemodell
+
+- `src/diffpf/io/reader.py` grundlegend überarbeitet.
+- `RawLine` von p.u.-Direkteingabe (`r_pu`, `x_pu`, `b_shunt_pu`) auf physikalische Einheiten umgestellt.
+- Zwei exklusiv wählbare Eingabeformen eingeführt:
+  - **Form A (Direktwerte):** `r_ohm`, `x_ohm`, optional `b_shunt_s`
+  - **Form B (Belagswerte):** `length_km` + `r_ohm_per_km` + `x_ohm_per_km` + optional `b_shunt_s_per_km` oder `c_nf_per_km`
+- Mischformen und fehlende Pflichtfelder werden zur Ladezeit mit deutschen Fehlermeldungen abgewiesen.
+- `f_hz` zu `RawBase` hinzugefügt; Pflichtfeld wenn `c_nf_per_km` verwendet wird (Kapazität → Suszeptanz: b = 2π·f·C).
+- `src/diffpf/io/parser.py` erweitert.
+- Private Zwischenform `_PhysicalLine(r_ohm, x_ohm, b_shunt_s)` als kanonische physikalische Repräsentation eingeführt.
+- `_to_physical()` normiert beide Eingabeformen auf `_PhysicalLine`.
+- `_physical_to_pu()` rechnet über `BaseValues` in Per-Unit um.
+- Öffentliche Hilfsfunktion `line_to_pu(raw_line, base)` für externe Module ergänzt.
+- `src/diffpf/core/units.py` erweitert.
+- `BaseValues` um `f_hz`-Parameter, `y_base_s`-Attribut und `siemens_to_pu()`-Methode ergänzt.
+- `src/diffpf/io/__init__.py` aktualisiert: `line_to_pu` öffentlich exportiert.
+- `cases/three_bus_poc.json` auf physikalische Einheiten migriert.
+- `f_hz: 50.0` in den `base`-Block aufgenommen.
+- Leitungsparameter von p.u. auf Ohm / Siemens umgerechnet (Z_base = 0,16 Ω, Y_base = 6,25 S); numerische Äquivalenz zu den bisherigen Werten gewährleistet.
+- `src/diffpf/validation/pandapower_ref.py` angepasst.
+- Direkte `line.r_pu`-Zugriffe durch Aufrufe von `line_to_pu(line, base)` ersetzt.
+- `BaseValues`-Konstruktoren um `f_hz`-Argument ergänzt.
+- 13 neue Parser-Tests in `tests/test_io_parser.py` ergänzt:
+  - Form-A-Parsing und exakte p.u.-Umrechnung
+  - Shunt-Suszeptanz-Standardwert 0,0 bei fehlender Angabe
+  - Form-B-Parsing mit `b_shunt_s_per_km` und `c_nf_per_km`
+  - Fehlerfall: `c_nf_per_km` ohne `f_hz`
+  - Fehlerfall: Mischform A+B
+  - Fehlerfall: keine gültige Form
+  - Fehlerfall: beide Shunt-Spezifikationen gleichzeitig
+  - Fehlerfall: Null-Impedanz nach Belagsexpansion
+  - `f_hz`-Validierung in `BaseValues`
+
+## 2026-04-22 - Experiment 1: Persistenz der Validierungsergebnisse
+
+- `experiments/exp01_validate_pandapower.py` um CSV/JSON-Export erweitert.
+- Zwei flache Zeilentypen als Dataclasses eingeführt:
+  - `_SummaryRow` – ein Eintrag pro Betriebspunkt (Konvergenz, Iterationen, Residualnorm, Slack-Leistungen, Verluste, alle Abweichungsmetriken)
+  - `_LineFlowRow` – ein Eintrag pro (Betriebspunkt, Leitung) mit JAX- und pandapower-Flüssen sowie absoluten Differenzen
+- Exportierte Artefakte:
+  - `experiments/results/exp01_pandapower_validation/validation_summary.csv`
+  - `experiments/results/exp01_pandapower_validation/validation_summary.json`
+  - `experiments/results/exp01_pandapower_validation/line_flows.csv`
+  - `experiments/results/exp01_pandapower_validation/line_flows.json`
+
 ## 2026-04-13 - Experiment 2: Gradientenvalidierung
 
 - `src/diffpf/solver/implicit.py` ergänzt.

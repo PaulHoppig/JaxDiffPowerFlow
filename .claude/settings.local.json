@@ -7,7 +7,20 @@
       "Read(//c/Users/Paul/.claude/projects/C--Users-Paul-Documents-TH-Koeln-Bachelor-Bachelorarbeit-jax-diff-powerflow/memory//**)",
       "Read(//c/Users/Paul/.claude/projects/C--Users-Paul-Documents-TH-Koeln-Bachelor-Bachelorarbeit-jax-diff-powerflow/memory/**)",
       "Bash(.venv/Scripts/python -m pytest tests/ -v --tb=short)",
-      "Bash(.venv/Scripts/python -m pytest tests/)"
+      "Bash(.venv/Scripts/python -m pytest tests/)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q)",
+      "Bash(python experiments/exp01_validate_pandapower.py)",
+      "Bash(python -m experiments.exp01_validate_pandapower)",
+      "Bash(pip show:*)",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(where python:*)",
+      "Bash(py -3.12 -c \"import diffpf; print\\('ok'\\)\")",
+      "Bash(\"C:\\\\Users\\\\Paul\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\" -c \"import diffpf; print\\('ok'\\)\")",
+      "Bash(\"C:\\\\Users\\\\Paul\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\" -m pytest tests/test_pandapower_validation.py -v --no-header)",
+      "Bash(ls .venv/Scripts/python*)",
+      "Bash(ls .venv/bin/python*)",
+      "Bash(.venv/Scripts/python.exe experiments/exp01_validate_pandapower.py)",
+      "Bash(dir \"C:\\\\Users\\\\Paul\\\\Documents\\\\TH Koeln Bachelor\\\\Bachelorarbeit\\\\jax-diff-powerflow\\\\experiments\\\\results\\\\exp01_pandapower_validation\")"
     ]
   }
 }

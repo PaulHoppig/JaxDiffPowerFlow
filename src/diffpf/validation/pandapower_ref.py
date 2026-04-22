@@ -10,7 +10,7 @@ import numpy as np
 import pandapower as pp
 
 from diffpf.core import BaseValues, build_ybus, calc_power_injection, state_to_voltage
-from diffpf.io import load_json
+from diffpf.io import load_json, line_to_pu
 from diffpf.io.reader import RawNetwork
 from diffpf.solver import NewtonOptions, solve_power_flow_result
 
@@ -118,7 +118,7 @@ def _line_flows_from_voltage(
     voltage: np.ndarray,
 ) -> tuple[LineFlowResult, ...]:
     flows: list[LineFlowResult] = []
-    base = BaseValues(s_mva=raw.base.s_mva, v_kv=raw.base.v_kv)
+    base = BaseValues(s_mva=raw.base.s_mva, v_kv=raw.base.v_kv, f_hz=raw.base.f_hz)
     bus_order = {bus.id: idx for idx, bus in enumerate(raw.buses)}
 
     for line in raw.lines:
@@ -126,8 +126,9 @@ def _line_flows_from_voltage(
         to_idx = bus_order[line.to_bus]
         v_from = voltage[from_idx]
         v_to = voltage[to_idx]
-        y_series = 1.0 / complex(line.r_pu, line.x_pu)
-        y_shunt_half = 0.5j * line.b_shunt_pu
+        r_pu, x_pu, b_shunt_pu = line_to_pu(line, base)
+        y_series = 1.0 / complex(r_pu, x_pu)
+        y_shunt_half = 0.5j * b_shunt_pu
 
         i_from = (v_from - v_to) * y_series + v_from * y_shunt_half
         i_to = (v_to - v_from) * y_series + v_to * y_shunt_half
@@ -161,7 +162,7 @@ def solve_with_jax(
     voltage = np.asarray(state_to_voltage(topology, params, result.solution))
     y_bus = build_ybus(topology, params)
     s_injection = np.asarray(calc_power_injection(y_bus, voltage))
-    base = BaseValues(s_mva=raw.base.s_mva, v_kv=raw.base.v_kv)
+    base = BaseValues(s_mva=raw.base.s_mva, v_kv=raw.base.v_kv, f_hz=raw.base.f_hz)
 
     slack_idx = topology.slack_bus
     return JaxPowerFlowResult(
@@ -209,18 +210,20 @@ def solve_with_pandapower(raw: RawNetwork) -> PandapowerResult:
                 name=bus.name,
             )
 
+    _base_pp = BaseValues(s_mva=raw.base.s_mva, v_kv=raw.base.v_kv, f_hz=raw.base.f_hz)
     for line in raw.lines:
+        r_pu, x_pu, b_shunt_pu = line_to_pu(line, _base_pp)
         pp.create_impedance(
             net,
             from_bus=bus_lookup[line.from_bus],
             to_bus=bus_lookup[line.to_bus],
-            rft_pu=line.r_pu,
-            xft_pu=line.x_pu,
+            rft_pu=r_pu,
+            xft_pu=x_pu,
             sn_mva=raw.base.s_mva,
-            rtf_pu=line.r_pu,
-            xtf_pu=line.x_pu,
-            bf_pu=line.b_shunt_pu / 2.0,
-            bt_pu=line.b_shunt_pu / 2.0,
+            rtf_pu=r_pu,
+            xtf_pu=x_pu,
+            bf_pu=b_shunt_pu / 2.0,
+            bt_pu=b_shunt_pu / 2.0,
             name=line.name,
         )
 
