@@ -44,9 +44,9 @@ from pathlib import Path
 import jax.numpy as jnp
 
 from diffpf.compile.network import compile_network
-from diffpf.core.types import BusSpec, LineSpec, NetworkSpec, PFState
+from diffpf.core.types import BusSpec, LineSpec, NetworkSpec, PFState, ShuntSpec, TrafoSpec
 from diffpf.core.units import BaseValues
-from diffpf.io.reader import RawBus, RawLine, RawNetwork, load_json
+from diffpf.io.reader import RawBus, RawLine, RawNetwork, RawShunt, RawTrafo, load_json
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +138,88 @@ def _physical_to_pu(
 # ---------------------------------------------------------------------------
 
 
+def _raw_trafo_to_spec(
+    raw: RawTrafo,
+    base: BaseValues,
+    id_to_idx: dict[int, int],
+) -> TrafoSpec:
+    """
+    Wandelt einen ``RawTrafo`` in einen ``TrafoSpec`` um (Systembasis).
+
+    Die Kurzschlussimpedanz wird von der Trafo-Nennbasis (HV-Seite) auf die
+    Systembasis umgerechnet:
+
+      z_base_hv_ohm  = (vn_hv_kv * 1e3)² / (sn_mva * 1e6)
+      z_base_sys_ohm = base.z_base_ohm          (bezogen auf v_base = vn_hv_kv)
+      ratio          = z_base_hv_ohm / z_base_sys_ohm
+
+    Für die Magnetisierung:
+      i0 [pu] = i0_percent / 100  (auf Trafo-Basis)
+      p_fe [pu] = pfe_kw / (sn_mva * 1000)       (auf Trafo-Basis)
+      Leitwerte auf Systembasis: g_mag = p_fe * sn_mva / s_base, etc.
+    """
+    # Trafo-eigene Impedanzbasis (Hochspannungsseite) [Ω]
+    z_base_hv_ohm = (raw.vn_hv_kv * 1e3) ** 2 / (raw.sn_mva * 1e6)
+    z_base_sys_ohm = base.z_base_ohm
+    ratio = z_base_hv_ohm / z_base_sys_ohm
+
+    # Kurzschlussimpedanz auf Trafo-Nennbasis [pu]
+    z_k = raw.vk_percent / 100.0
+    r_k = raw.vkr_percent / 100.0
+    x_k = math.sqrt(max(z_k**2 - r_k**2, 0.0))
+
+    # Auf Systembasis umrechnen
+    r_pu = r_k * ratio
+    x_pu = x_k * ratio
+
+    # Magnetisierung
+    i0 = raw.i0_percent / 100.0
+    p_fe = raw.pfe_kw / (raw.sn_mva * 1000.0)   # pu auf Trafo-Basis
+    g_mag_trafo = p_fe
+    b_mag_trafo = math.sqrt(max(i0**2 - p_fe**2, 0.0))
+
+    # Umrechnung auf Systembasis: Leitwert Y_sys = Y_trafo * (sn_mva / s_base)
+    base_factor = raw.sn_mva / base.s_mva
+    g_mag_pu = g_mag_trafo * base_factor
+    b_mag_pu = b_mag_trafo * base_factor
+
+    return TrafoSpec(
+        hv_bus=id_to_idx[raw.hv_bus],
+        lv_bus=id_to_idx[raw.lv_bus],
+        r_pu=r_pu,
+        x_pu=x_pu,
+        g_mag_pu=g_mag_pu,
+        b_mag_pu=b_mag_pu,
+        tap_ratio=raw.tap_ratio,
+        shift_rad=raw.shift_rad,
+        name=raw.name,
+    )
+
+
+def _raw_shunt_to_spec(
+    raw: RawShunt,
+    base: BaseValues,
+    id_to_idx: dict[int, int],
+) -> ShuntSpec:
+    """
+    Wandelt einen ``RawShunt`` in einen ``ShuntSpec`` um (Systembasis).
+
+    pandapower-Konvention: positives q_mvar = induktiv = absorbiert Blindleistung
+    → negativer Suszeptanzanteil in Y.
+    Der Shunt im JSON-Format trägt P+jQ als Verbrauch (wie pandapower).
+
+    Y = (P - jQ) / s_base   [pu]  (Nennspannung ≈ Systembasis → keine Spannungskorrektur)
+    """
+    g_pu = raw.p_mw / base.s_mva
+    b_pu = -raw.q_mvar / base.s_mva   # induktiv (positives q) → negatives b
+    return ShuntSpec(
+        bus=id_to_idx[raw.bus],
+        g_pu=g_pu,
+        b_pu=b_pu,
+        name=raw.name,
+    )
+
+
 def _slack_rectangular(bus: RawBus) -> tuple[float, float]:
     """Gibt (vr_pu, vi_pu) für den Slack-Bus aus Polarkoordinaten zurück."""
     ang_rad = math.radians(bus.v_ang_deg)
@@ -182,6 +264,16 @@ def _build_spec(raw: RawNetwork, base: BaseValues) -> NetworkSpec:
     p_spec = tuple(base.mw_to_pu(b.p_mw) for b in raw.buses)
     q_spec = tuple(base.mvar_to_pu(b.q_mvar) for b in raw.buses)
 
+    # Transformatoren
+    trafos = tuple(
+        _raw_trafo_to_spec(t, base, id_to_idx) for t in raw.trafos
+    )
+
+    # Shunts
+    shunts = tuple(
+        _raw_shunt_to_spec(s, base, id_to_idx) for s in raw.shunts
+    )
+
     slack_bus = next(b for b in raw.buses if b.type == "slack")
     slack_vr, slack_vi = _slack_rectangular(slack_bus)
 
@@ -192,6 +284,8 @@ def _build_spec(raw: RawNetwork, base: BaseValues) -> NetworkSpec:
         q_spec_pu=q_spec,
         slack_vr_pu=slack_vr,
         slack_vi_pu=slack_vi,
+        trafos=trafos,
+        shunts=shunts,
     )
 
 

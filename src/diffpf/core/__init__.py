@@ -20,6 +20,8 @@ from .types import (
     NetworkParams,
     NetworkSpec,
     PFState,
+    ShuntSpec,
+    TrafoSpec,
 )
 from .units import BaseValues
 from .ybus import build_ybus
@@ -28,6 +30,8 @@ __all__ = [
     # types
     "BusSpec",
     "LineSpec",
+    "TrafoSpec",
+    "ShuntSpec",
     "NetworkSpec",
     "CompiledTopology",
     "NetworkParams",

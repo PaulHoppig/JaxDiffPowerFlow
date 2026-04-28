@@ -53,6 +53,31 @@ class LineSpec:
 
 
 @dataclass(frozen=True)
+class TrafoSpec:
+    """Human-readable 2-winding transformer in per-unit (Pi-model, system base)."""
+
+    hv_bus: int
+    lv_bus: int
+    r_pu: float
+    x_pu: float
+    g_mag_pu: float = 0.0   # magnetising conductance (iron losses)
+    b_mag_pu: float = 0.0   # magnetising susceptance (no-load current)
+    tap_ratio: float = 1.0  # final tap factor (dimensionless)
+    shift_rad: float = 0.0  # phase shift in radians
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class ShuntSpec:
+    """Human-readable shunt admittance in per-unit."""
+
+    bus: int
+    g_pu: float = 0.0   # conductance  (losses)
+    b_pu: float = 0.0   # susceptance  (positive = capacitive in generator sign)
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class NetworkSpec:
     """
     Human-readable network input: static topology + default parameters.
@@ -67,6 +92,10 @@ class NetworkSpec:
     q_spec_pu: tuple[float, ...]
     slack_vr_pu: float = 1.0
     slack_vi_pu: float = 0.0
+    trafos: tuple[TrafoSpec, ...] = ()
+    shunts: tuple[ShuntSpec, ...] = ()
+    # PV-bus setpoints: dict mapping bus index → v_set_pu (may be empty)
+    v_set_pu: tuple[tuple[int, float], ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +135,22 @@ class CompiledTopology:
         "b_shunt_pu",
         "slack_vr_pu",
         "slack_vi_pu",
+        # transformer arrays (empty if no trafos)
+        "trafo_g_series_pu",
+        "trafo_b_series_pu",
+        "trafo_g_mag_pu",
+        "trafo_b_mag_pu",
+        "trafo_tap_ratio",
+        "trafo_shift_rad",
+        # shunt arrays (empty if no shunts)
+        "shunt_g_pu",
+        "shunt_b_pu",
     ],
-    meta_fields=[],
+    meta_fields=[
+        "trafo_hv_bus",
+        "trafo_lv_bus",
+        "shunt_bus",
+    ],
 )
 @dataclass(frozen=True)
 class NetworkParams:
@@ -119,6 +162,8 @@ class NetworkParams:
       p_spec_pu, q_spec_pu : (n_bus,)
       g_series_pu, b_series_pu, b_shunt_pu : (n_line,)
       slack_vr_pu, slack_vi_pu : scalar
+      trafo_* : (n_trafo,)
+      shunt_* : (n_shunt,)
     """
 
     p_spec_pu: jnp.ndarray
@@ -128,6 +173,19 @@ class NetworkParams:
     b_shunt_pu: jnp.ndarray
     slack_vr_pu: jnp.ndarray
     slack_vi_pu: jnp.ndarray
+    # transformer arrays (empty by default → no trafos)
+    trafo_g_series_pu: jnp.ndarray = None   # shape (n_trafo,)
+    trafo_b_series_pu: jnp.ndarray = None   # shape (n_trafo,)
+    trafo_g_mag_pu: jnp.ndarray = None      # shape (n_trafo,)
+    trafo_b_mag_pu: jnp.ndarray = None      # shape (n_trafo,)
+    trafo_tap_ratio: jnp.ndarray = None     # shape (n_trafo,)
+    trafo_shift_rad: jnp.ndarray = None     # shape (n_trafo,)
+    trafo_hv_bus: tuple[int, ...] = ()      # meta (static)
+    trafo_lv_bus: tuple[int, ...] = ()      # meta (static)
+    # shunt arrays (empty by default → no shunts)
+    shunt_g_pu: jnp.ndarray = None          # shape (n_shunt,)
+    shunt_b_pu: jnp.ndarray = None          # shape (n_shunt,)
+    shunt_bus: tuple[int, ...] = ()         # meta (static)
 
 
 @partial(

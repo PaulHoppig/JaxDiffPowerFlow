@@ -12,10 +12,13 @@ Current injection:
 Complex power injection:
   S_calc = V * conj(I)
 
-Power mismatch (non-slack buses only):
-  r_P = P_spec - Re(S_calc)   [shape: (n_var,)]
-  r_Q = Q_spec - Im(S_calc)   [shape: (n_var,)]
-  r   = [r_P | r_Q]            [shape: (2*n_var,)]
+Residual for non-slack bus i (index in variable_buses):
+  PQ-bus:
+    r[2i]   = p_spec[i] - P_calc[i]
+    r[2i+1] = q_spec[i] - Q_calc[i]
+  PV-bus:
+    r[2i]   = p_spec[i] - P_calc[i]
+    r[2i+1] = v_set_pu[i]**2 - (Vr[i]**2 + Vi[i]**2)
 
 Scalar loss:
   L = 0.5 * ||r||²
@@ -77,12 +80,20 @@ def power_flow_residual(
     state: PFState,
 ) -> jnp.ndarray:
     """
-    Compute the concatenated PQ mismatch vector for non-slack buses.
+    Compute the concatenated mismatch vector for non-slack buses.
+
+    For each non-slack bus i (index into variable_buses):
+      PQ-bus  (is_pq_mask[i] == True):
+        r[2i]   = p_spec[i] - P_calc[i]
+        r[2i+1] = q_spec[i] - Q_calc[i]
+      PV-bus  (is_pv_mask[i] == True):
+        r[2i]   = p_spec[i] - P_calc[i]
+        r[2i+1] = v_set_pu[i]**2 - (Vr[i]**2 + Vi[i]**2)
 
     Returns
     -------
     r : jnp.ndarray
-        Float64 array of shape (2 * n_var,) = [r_P | r_Q].
+        Float64 array of shape (2 * n_var,).
     """
     y_bus = build_ybus(topology, params)
     voltage = state_to_voltage(topology, params, state)
@@ -90,7 +101,14 @@ def power_flow_residual(
 
     var = topology.variable_buses
     r_p = params.p_spec_pu[var] - jnp.real(s_calc[var])
-    r_q = params.q_spec_pu[var] - jnp.imag(s_calc[var])
+
+    # Q-mismatch for PQ buses; voltage magnitude equation for PV buses
+    r_q_pq = params.q_spec_pu[var] - jnp.imag(s_calc[var])
+    v_mag_sq_calc = state.vr_pu ** 2 + state.vi_pu ** 2
+    r_q_pv = params.v_set_pu ** 2 - v_mag_sq_calc
+
+    r_q = jnp.where(topology.is_pv_mask, r_q_pv, r_q_pq)
+
     return jnp.concatenate([r_p, r_q], axis=0)
 
 

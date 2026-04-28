@@ -112,11 +112,45 @@ class RawLine:
 
 
 @dataclass
+class RawTrafo:
+    """2-Wicklungs-Transformator mit physikalischen Kenngrößen."""
+
+    id: int
+    hv_bus: int                      # Hochspannungsseite – Bus-ID
+    lv_bus: int                      # Niederspannungsseite – Bus-ID
+    sn_mva: float                    # Nennleistung [MVA]
+    vn_hv_kv: float                  # HV-Nennspannung [kV]
+    vn_lv_kv: float                  # NV-Nennspannung [kV]
+    vk_percent: float                # Kurzschlussspannung [%]
+    vkr_percent: float               # Wirkanteil der Kurzschlussspannung [%]
+    pfe_kw: float = 0.0              # Eisenverluste [kW]
+    i0_percent: float = 0.0          # Leerlaufstrom [%]
+    tap_ratio: float = 1.0           # finales Übersetzungsverhältnis (Faktor, bereits berechnet)
+    shift_rad: float = 0.0           # Phasenverschiebung [rad] (bereits in Radiant)
+    name: str = ""
+    in_service: bool = True
+
+
+@dataclass
+class RawShunt:
+    """Shuntadmittanz (Parallelkondensator / -drossel)."""
+
+    id: int
+    bus: int                         # Bus-ID
+    p_mw: float                      # Wirkleistungsverbrauch [MW]
+    q_mvar: float                    # Blindleistungsverbrauch [Mvar]; positiv = induktiv
+    name: str = ""
+    in_service: bool = True
+
+
+@dataclass
 class RawNetwork:
     name: str
     base: RawBase
     buses: list[RawBus]     # aufsteigend nach id sortiert
     lines: list[RawLine]    # aufsteigend nach id sortiert
+    trafos: list[RawTrafo] = field(default_factory=list)
+    shunts: list[RawShunt] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +278,45 @@ def _validate_line(raw: RawLine, bus_id_set: set[int]) -> None:
         )
 
 
+def _validate_trafo(raw: "RawTrafo", bus_id_set: set[int]) -> None:
+    """Semantische Validierung eines Transformators."""
+    if raw.hv_bus not in bus_id_set:
+        raise ValueError(
+            f"Trafo {raw.id}: hv_bus={raw.hv_bus} nicht in der Bus-Liste."
+        )
+    if raw.lv_bus not in bus_id_set:
+        raise ValueError(
+            f"Trafo {raw.id}: lv_bus={raw.lv_bus} nicht in der Bus-Liste."
+        )
+    if raw.hv_bus == raw.lv_bus:
+        raise ValueError(
+            f"Trafo {raw.id}: Selbstschleife (hv_bus == lv_bus == {raw.hv_bus})."
+        )
+    if raw.sn_mva <= 0:
+        raise ValueError(f"Trafo {raw.id}: sn_mva muss > 0 sein, got {raw.sn_mva}.")
+    if raw.vn_hv_kv <= 0:
+        raise ValueError(f"Trafo {raw.id}: vn_hv_kv muss > 0 sein, got {raw.vn_hv_kv}.")
+    if raw.vn_lv_kv <= 0:
+        raise ValueError(f"Trafo {raw.id}: vn_lv_kv muss > 0 sein, got {raw.vn_lv_kv}.")
+    if raw.vk_percent <= 0:
+        raise ValueError(
+            f"Trafo {raw.id}: vk_percent muss > 0 sein, got {raw.vk_percent}."
+        )
+    if raw.vkr_percent < 0 or raw.vkr_percent > raw.vk_percent:
+        raise ValueError(
+            f"Trafo {raw.id}: vkr_percent muss in [0, vk_percent={raw.vk_percent}] "
+            f"liegen, got {raw.vkr_percent}."
+        )
+
+
+def _validate_shunt(raw: "RawShunt", bus_id_set: set[int]) -> None:
+    """Semantische Validierung eines Shunts."""
+    if raw.bus not in bus_id_set:
+        raise ValueError(
+            f"Shunt {raw.id}: bus={raw.bus} nicht in der Bus-Liste."
+        )
+
+
 def _validate(net: RawNetwork) -> None:
     """Wirft ``ValueError`` bei strukturellen oder semantischen Fehlern."""
     # Basis
@@ -289,6 +362,14 @@ def _validate(net: RawNetwork) -> None:
                 f"das jedoch nicht angegeben wurde."
             )
 
+    # Transformatoren
+    for trafo in net.trafos:
+        _validate_trafo(trafo, bus_id_set)
+
+    # Shunts
+    for shunt in net.shunts:
+        _validate_shunt(shunt, bus_id_set)
+
 
 # ---------------------------------------------------------------------------
 # Öffentliche API
@@ -329,16 +410,22 @@ def load_json(path: str | Path) -> RawNetwork:
     base = _dataclass_from_dict(RawBase, data["base"])
     buses = [_dataclass_from_dict(RawBus, b) for b in data["buses"]]
     lines = [_dataclass_from_dict(RawLine, ln) for ln in data["lines"]]
+    trafos = [_dataclass_from_dict(RawTrafo, t) for t in data.get("trafos", [])]
+    shunts = [_dataclass_from_dict(RawShunt, s) for s in data.get("shunts", [])]
 
     # Kanonische Reihenfolge: aufsteigend nach id
     buses.sort(key=lambda b: b.id)
     lines.sort(key=lambda ln: ln.id)
+    trafos.sort(key=lambda t: t.id)
+    shunts.sort(key=lambda s: s.id)
 
     net = RawNetwork(
         name=data.get("meta", {}).get("name", path.stem),
         base=base,
         buses=buses,
         lines=lines,
+        trafos=trafos,
+        shunts=shunts,
     )
     _validate(net)
     return net

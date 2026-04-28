@@ -27,6 +27,7 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
     ----------
     spec : NetworkSpec
         Human-readable network definition with topology and per-unit parameters.
+        May include optional ``trafos`` and ``shunts``.
 
     Returns
     -------
@@ -51,6 +52,9 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
         [i for i in range(n_bus) if i != slack_bus], dtype=jnp.int32
     )
 
+    # ------------------------------------------------------------------
+    # Lines
+    # ------------------------------------------------------------------
     from_bus, to_bus, g_series, b_series, b_shunt = [], [], [], [], []
     for line in spec.lines:
         if not (0 <= line.from_bus < n_bus and 0 <= line.to_bus < n_bus):
@@ -67,6 +71,58 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
         b_series.append(y.imag)
         b_shunt.append(line.b_shunt_pu)
 
+    # ------------------------------------------------------------------
+    # Transformers
+    # ------------------------------------------------------------------
+    t_hv: list[int] = []
+    t_lv: list[int] = []
+    t_g_series: list[float] = []
+    t_b_series: list[float] = []
+    t_g_mag: list[float] = []
+    t_b_mag: list[float] = []
+    t_tap: list[float] = []
+    t_shift: list[float] = []
+
+    for trafo in spec.trafos:
+        if not (0 <= trafo.hv_bus < n_bus and 0 <= trafo.lv_bus < n_bus):
+            raise ValueError(
+                f"Trafo ({trafo.hv_bus}→{trafo.lv_bus}): endpoint out of range."
+            )
+        if trafo.hv_bus == trafo.lv_bus:
+            raise ValueError("Transformer self-loop is not allowed.")
+        import cmath
+        z = complex(trafo.r_pu, trafo.x_pu)
+        if abs(z) < 1e-12:
+            raise ValueError(
+                f"Trafo ({trafo.hv_bus}→{trafo.lv_bus}): near-zero series impedance."
+            )
+        y_t = 1.0 / z
+        t_hv.append(trafo.hv_bus)
+        t_lv.append(trafo.lv_bus)
+        t_g_series.append(y_t.real)
+        t_b_series.append(y_t.imag)
+        t_g_mag.append(trafo.g_mag_pu)
+        t_b_mag.append(trafo.b_mag_pu)
+        t_tap.append(trafo.tap_ratio)
+        t_shift.append(trafo.shift_rad)
+
+    # ------------------------------------------------------------------
+    # Shunts
+    # ------------------------------------------------------------------
+    sh_bus: list[int] = []
+    sh_g: list[float] = []
+    sh_b: list[float] = []
+
+    for shunt in spec.shunts:
+        if not (0 <= shunt.bus < n_bus):
+            raise ValueError(f"Shunt bus {shunt.bus} out of range [0, {n_bus}).")
+        sh_bus.append(shunt.bus)
+        sh_g.append(shunt.g_pu)
+        sh_b.append(shunt.b_pu)
+
+    # ------------------------------------------------------------------
+    # Assemble
+    # ------------------------------------------------------------------
     topology = CompiledTopology(
         n_bus=n_bus,
         slack_bus=slack_bus,
@@ -82,5 +138,18 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
         b_shunt_pu=jnp.asarray(b_shunt, dtype=jnp.float64),
         slack_vr_pu=jnp.asarray(spec.slack_vr_pu, dtype=jnp.float64),
         slack_vi_pu=jnp.asarray(spec.slack_vi_pu, dtype=jnp.float64),
+        # transformers
+        trafo_g_series_pu=jnp.asarray(t_g_series, dtype=jnp.float64),
+        trafo_b_series_pu=jnp.asarray(t_b_series, dtype=jnp.float64),
+        trafo_g_mag_pu=jnp.asarray(t_g_mag, dtype=jnp.float64),
+        trafo_b_mag_pu=jnp.asarray(t_b_mag, dtype=jnp.float64),
+        trafo_tap_ratio=jnp.asarray(t_tap, dtype=jnp.float64),
+        trafo_shift_rad=jnp.asarray(t_shift, dtype=jnp.float64),
+        trafo_hv_bus=tuple(t_hv),
+        trafo_lv_bus=tuple(t_lv),
+        # shunts
+        shunt_g_pu=jnp.asarray(sh_g, dtype=jnp.float64),
+        shunt_b_pu=jnp.asarray(sh_b, dtype=jnp.float64),
+        shunt_bus=tuple(sh_bus),
     )
     return topology, params

@@ -20,7 +20,12 @@
       "Bash(ls .venv/Scripts/python*)",
       "Bash(ls .venv/bin/python*)",
       "Bash(.venv/Scripts/python.exe experiments/exp01_validate_pandapower.py)",
-      "Bash(dir \"C:\\\\Users\\\\Paul\\\\Documents\\\\TH Koeln Bachelor\\\\Bachelorarbeit\\\\jax-diff-powerflow\\\\experiments\\\\results\\\\exp01_pandapower_validation\")"
+      "Bash(dir \"C:\\\\Users\\\\Paul\\\\Documents\\\\TH Koeln Bachelor\\\\Bachelorarbeit\\\\jax-diff-powerflow\\\\experiments\\\\results\\\\exp01_pandapower_validation\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v --tb=short)",
+      "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/' -v --tb=short)",
+      "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_topology_utils.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_ybus.py' -v --tb=short)",
+      "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_trafo.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_shunt.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_pv_bus.py' -v --tb=short)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v --tb=short -q)"
     ]
   }
 }

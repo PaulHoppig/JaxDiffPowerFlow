@@ -3,6 +3,45 @@
 Dieses Dokument fasst die bisher umgesetzten Entwicklungsschritte im Projekt `diffpf`
 zusammen, inklusive der Parser-Schicht und der bisher realisierten Experimente.
 
+## 2026-04-28 - pandapower I/O-Pipeline
+
+### Neue Dateien
+- `src/diffpf/io/pandapower_adapter.py` – pandapower-Netzobjekt → NetworkSpec
+- `src/diffpf/io/topology_utils.py` – `merge_buses()` via Union-Find für Bus-Bus-Switch-Fusion
+- `docs/pandapower_io_pipeline.md` – eigenständige Dokumentation der Pipeline
+- `docs/pandapower_example_simple_preparation.md` – Netzaufbau und Mapping für example_simple()
+- `tests/test_pandapower_adapter.py` – 16 Tests (15 passed, 1 xfail) für die pandapower-Pipeline
+- `tests/test_json_trafo_shunt.py` – 11 Tests für das erweiterte JSON-Format
+
+### Geänderte Dateien
+- `src/diffpf/core/types.py` – `TrafoSpec`, `ShuntSpec` hinzugefügt; `NetworkSpec` um `trafos`, `shunts`, `v_set_pu` erweitert; `NetworkParams` um Trafo- und Shunt-Arrays erweitert (mit Defaults)
+- `src/diffpf/core/ybus.py` – Trafo-Pi-Modell (off-nominal tap + Phasenverschiebung) und Shunt-Diagonal-Stamp ergänzt
+- `src/diffpf/compile/network.py` – Kompilierung von TrafoSpec und ShuntSpec hinzugefügt
+- `src/diffpf/io/reader.py` – `RawTrafo`, `RawShunt` Dataclasses; `RawNetwork` um `trafos`/`shunts` erweitert; Validierungsregeln ergänzt
+- `src/diffpf/io/parser.py` – `_raw_trafo_to_spec()`, `_raw_shunt_to_spec()` hinzugefügt; `_build_spec()` erweitert
+- `src/diffpf/io/__init__.py` – `from_pandapower`, `load_pandapower_json`, `RawTrafo`, `RawShunt` exportiert
+- `src/diffpf/core/__init__.py` – `TrafoSpec`, `ShuntSpec` exportiert
+
+### Neue Funktionen / Klassen
+- `from_pandapower(net) -> NetworkSpec`
+- `load_pandapower_json(path) -> NetworkSpec`
+- `merge_buses(bus_ids, switch_pairs) -> dict[int, int]`
+- `TrafoSpec` (Dataclass, frozen)
+- `ShuntSpec` (Dataclass, frozen)
+- `RawTrafo` (Dataclass)
+- `RawShunt` (Dataclass)
+- `_raw_trafo_to_spec(raw, base, id_to_idx) -> TrafoSpec`
+- `_raw_shunt_to_spec(raw, base, id_to_idx) -> ShuntSpec`
+
+### Unterstützte pandapower-Elemente
+ext_grid (Slack), bus (nach Switch-Fusion), load, sgen, gen (PV, kein Q-Enforcement),
+line (Pi-Modell), trafo (2-Wicklungs-Pi-Modell mit tap/shift), shunt
+
+### Bekannte Einschränkungen
+- PV-Busse werden wie PQ-Busse behandelt (kein Spannungsregler)
+- Flat-Start versagt bei Netzen mit >90° Trafo-Phasenverschiebung
+- trafo3w, xward, ward, impedance, dcline werden nicht unterstützt
+
 ## 2026-04-22 - Refaktorierung: Physikalische Leitungsparameter im JSON-Eingabemodell
 
 - `src/diffpf/io/reader.py` grundlegend überarbeitet.
