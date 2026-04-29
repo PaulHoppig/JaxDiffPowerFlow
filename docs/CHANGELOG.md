@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-04-29 - Experiment 1b: Validierung example_simple()
+
+### Neue Dateien
+- `experiments/exp01_validate_example_simple.py` – Vollständige Validierung des
+  pandapower `example_simple()`-Netzes gegen diffpf; direkt ausführbar
+- `tests/test_exp01_example_simple_outputs.py` – 28 Tests für Experiment 1b
+  (Importierbarkeit, Spalten, Physik, CSV/JSON-Export); 1 Slow-Integrationstest
+
+### Szenarien
+`base`, `load_low`, `load_high`, `sgen_low`, `sgen_high`,
+`combined_high_load_low_sgen`, `combined_low_load_high_sgen`
+
+### Zwei Referenzmodi
+- **`scope_matched`** – `gen` wird in `sgen(P, Q=0)` umgewandelt; pandapower und
+  diffpf verwenden dasselbe Modell; strikte numerische Validierung möglich
+- **`original_pandapower`** – Original-Netz mit PV-Bus in pandapower; diffpf
+  weiterhin mit `sgen(Q=0)`; Kontextvergleich (Q-Abweichungen erwartet)
+
+### Exportierte Artefakte (in `experiments/results/exp01_example_simple_validation/`)
+`validation_summary.csv/json`, `bus_results.csv/json`, `slack_results.csv/json`,
+`line_flows.csv/json`, `trafo_flows.csv/json`, `losses.csv/json`,
+`structure_summary.csv/json`, `metadata.json`, `README.md`
+
+### Initialisierungsstrategie
+Trafo-shift-aware Start: HV-Busse am Slack-Winkel, LV-Busse bei
+`slack_angle − trafo_shift_deg`; vermeidet Flat-Start-Divergenz bei 150°-Trafo
+
+### Bekannte Einschränkungen
+- gen ohne Spannungsregelung (PV-Bus nur in pandapower, nicht in diffpf)
+- Kein Q-Limit-Enforcement
+- Keine PV↔PQ-Umschaltung
+- `original_pandapower`-Modus kein strikter Gleichheitstest
+
+
+
 Dieses Dokument fasst die bisher umgesetzten Entwicklungsschritte im Projekt `diffpf`
 zusammen, inklusive der Parser-Schicht und der bisher realisierten Experimente.
 

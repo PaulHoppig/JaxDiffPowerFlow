@@ -35,6 +35,7 @@ where = ["src"]
 pythonpath = ["src", "."]
 testpaths  = ["tests"]
 addopts    = "-v --tb=short"
+markers    = ["slow: long-running integration tests (deselect with -m 'not slow')"]
 
 # ---------------------------------------------------------------------------
 # Ruff (Linter)

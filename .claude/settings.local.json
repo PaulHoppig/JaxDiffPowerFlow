@@ -25,7 +25,11 @@
       "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/' -v --tb=short)",
       "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_topology_utils.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_ybus.py' -v --tb=short)",
       "Bash('/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.venv/Scripts/python.exe' -m pytest '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_trafo.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_shunt.py' '/c/Users/Paul/Documents/TH Koeln Bachelor/Bachelorarbeit/jax-diff-powerflow/.claude/worktrees/agent-a9ffdf7d/tests/test_pv_bus.py' -v --tb=short)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v --tb=short -q)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v --tb=short -q)",
+      "Bash(python -m pytest tests/ -x -q --ignore=tests/test_exp01_example_simple_outputs.py)",
+      "Bash(python -m pytest --version)",
+      "Bash(py -m pytest --version)",
+      "Bash(python3 -m pytest --version)"
     ]
   }
 }
