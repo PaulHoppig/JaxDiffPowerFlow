@@ -39,6 +39,8 @@ class BusSpec:
 
     name: str
     is_slack: bool = False
+    is_pv: bool = False        # True → Spannungsbetragsgleichung statt Q-Gleichung
+    v_set_pu: float = 1.0      # Sollspannung für PV-Bus; Dummy-Wert für PQ-Busse
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ class NetworkSpec:
 
 @partial(
     tree_util.register_dataclass,
-    data_fields=["from_bus", "to_bus", "variable_buses"],
+    data_fields=["from_bus", "to_bus", "variable_buses", "is_pq_mask", "is_pv_mask"],
     meta_fields=["n_bus", "slack_bus"],
 )
 @dataclass(frozen=True)
@@ -114,15 +116,17 @@ class CompiledTopology:
     Static array-based network topology.
 
     ``meta_fields`` are compile-time constants for jit/grad.
-    ``data_fields`` are integer index arrays; treat as
-    stop_gradient when differentiating physical parameters.
+    ``data_fields`` are integer index arrays and static boolean masks;
+    treat as stop_gradient when differentiating physical parameters.
     """
 
     n_bus: int
     slack_bus: int
-    from_bus: jnp.ndarray     # int32, shape (n_line,)
-    to_bus: jnp.ndarray       # int32, shape (n_line,)
-    variable_buses: jnp.ndarray  # int32, shape (n_bus - 1,)
+    from_bus: jnp.ndarray        # int32, shape (n_line,)
+    to_bus: jnp.ndarray          # int32, shape (n_line,)
+    variable_buses: jnp.ndarray  # int32, shape (n_var,)
+    is_pq_mask: jnp.ndarray      # bool,  shape (n_var,) – True für PQ-Busse
+    is_pv_mask: jnp.ndarray      # bool,  shape (n_var,) – True für PV-Busse
 
 
 @partial(
@@ -130,6 +134,7 @@ class CompiledTopology:
     data_fields=[
         "p_spec_pu",
         "q_spec_pu",
+        "v_set_pu",
         "g_series_pu",
         "b_series_pu",
         "b_shunt_pu",
@@ -168,6 +173,7 @@ class NetworkParams:
 
     p_spec_pu: jnp.ndarray
     q_spec_pu: jnp.ndarray
+    v_set_pu: jnp.ndarray        # shape (n_var,); Sollspannung PV-Bus, Dummy 1.0 für PQ
     g_series_pu: jnp.ndarray
     b_series_pu: jnp.ndarray
     b_shunt_pu: jnp.ndarray

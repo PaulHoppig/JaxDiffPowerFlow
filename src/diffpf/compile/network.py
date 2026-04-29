@@ -48,9 +48,15 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
         raise ValueError("p_spec_pu and q_spec_pu length must equal number of buses.")
 
     slack_bus = slack_indices[0]
-    variable_buses = jnp.asarray(
-        [i for i in range(n_bus) if i != slack_bus], dtype=jnp.int32
-    )
+    variable_bus_indices = [i for i in range(n_bus) if i != slack_bus]
+    variable_buses = jnp.asarray(variable_bus_indices, dtype=jnp.int32)
+
+    # PV-Bus-Masken und Sollspannungen aus BusSpec ableiten
+    is_pv_list = [spec.buses[i].is_pv for i in variable_bus_indices]
+    v_set_list = [spec.buses[i].v_set_pu for i in variable_bus_indices]
+    is_pv_mask = jnp.asarray(is_pv_list, dtype=bool)
+    is_pq_mask = ~is_pv_mask
+    v_set_pu_arr = jnp.asarray(v_set_list, dtype=jnp.float64)
 
     # ------------------------------------------------------------------
     # Lines
@@ -129,10 +135,13 @@ def compile_network(spec: NetworkSpec) -> tuple[CompiledTopology, NetworkParams]
         from_bus=jnp.asarray(from_bus, dtype=jnp.int32),
         to_bus=jnp.asarray(to_bus, dtype=jnp.int32),
         variable_buses=variable_buses,
+        is_pq_mask=is_pq_mask,
+        is_pv_mask=is_pv_mask,
     )
     params = NetworkParams(
         p_spec_pu=jnp.asarray(spec.p_spec_pu, dtype=jnp.float64),
         q_spec_pu=jnp.asarray(spec.q_spec_pu, dtype=jnp.float64),
+        v_set_pu=v_set_pu_arr,
         g_series_pu=jnp.asarray(g_series, dtype=jnp.float64),
         b_series_pu=jnp.asarray(b_series, dtype=jnp.float64),
         b_shunt_pu=jnp.asarray(b_shunt, dtype=jnp.float64),

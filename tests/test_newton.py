@@ -123,20 +123,23 @@ def test_gradient_p_pv_matches_finite_difference(three_bus_case):
         varied = NetworkParams(
             p_spec_pu=params.p_spec_pu.at[2].set(p_pv),
             q_spec_pu=params.q_spec_pu,
+            v_set_pu=params.v_set_pu,
             g_series_pu=params.g_series_pu,
             b_series_pu=params.b_series_pu,
             b_shunt_pu=params.b_shunt_pu,
             slack_vr_pu=params.slack_vr_pu,
             slack_vi_pu=params.slack_vi_pu,
-            v_set_pu=params.v_set_pu,
-            trafo_r_pu=params.trafo_r_pu,
-            trafo_x_pu=params.trafo_x_pu,
+            trafo_g_series_pu=params.trafo_g_series_pu,
+            trafo_b_series_pu=params.trafo_b_series_pu,
             trafo_g_mag_pu=params.trafo_g_mag_pu,
             trafo_b_mag_pu=params.trafo_b_mag_pu,
             trafo_tap_ratio=params.trafo_tap_ratio,
             trafo_shift_rad=params.trafo_shift_rad,
+            trafo_hv_bus=params.trafo_hv_bus,
+            trafo_lv_bus=params.trafo_lv_bus,
             shunt_g_pu=params.shunt_g_pu,
             shunt_b_pu=params.shunt_b_pu,
+            shunt_bus=params.shunt_bus,
         )
         return residual_loss(topology, varied, state)
 
@@ -178,20 +181,23 @@ def test_gradient_r_pu_matches_finite_difference(three_bus_case):
         varied = NetworkParams(
             p_spec_pu=params.p_spec_pu,
             q_spec_pu=params.q_spec_pu,
+            v_set_pu=params.v_set_pu,
             g_series_pu=params.g_series_pu.at[0].set(g0),
             b_series_pu=params.b_series_pu,
             b_shunt_pu=params.b_shunt_pu,
             slack_vr_pu=params.slack_vr_pu,
             slack_vi_pu=params.slack_vi_pu,
-            v_set_pu=params.v_set_pu,
-            trafo_r_pu=params.trafo_r_pu,
-            trafo_x_pu=params.trafo_x_pu,
+            trafo_g_series_pu=params.trafo_g_series_pu,
+            trafo_b_series_pu=params.trafo_b_series_pu,
             trafo_g_mag_pu=params.trafo_g_mag_pu,
             trafo_b_mag_pu=params.trafo_b_mag_pu,
             trafo_tap_ratio=params.trafo_tap_ratio,
             trafo_shift_rad=params.trafo_shift_rad,
+            trafo_hv_bus=params.trafo_hv_bus,
+            trafo_lv_bus=params.trafo_lv_bus,
             shunt_g_pu=params.shunt_g_pu,
             shunt_b_pu=params.shunt_b_pu,
+            shunt_bus=params.shunt_bus,
         )
         return residual_loss(topology, varied, state)
 

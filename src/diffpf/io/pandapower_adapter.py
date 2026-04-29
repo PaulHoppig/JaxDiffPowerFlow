@@ -342,7 +342,11 @@ def from_pandapower(net) -> NetworkSpec:
     buses_list: list[BusSpec] = []
     for repr_id in repr_bus_ids:
         is_slack = (repr_id == slack_repr_bus)
-        buses_list.append(BusSpec(name=str(repr_id), is_slack=is_slack))
+        is_pv = (repr_id in pv_repr_buses) and not is_slack
+        v_set = pv_repr_buses.get(repr_id, 1.0)
+        buses_list.append(
+            BusSpec(name=str(repr_id), is_slack=is_slack, is_pv=is_pv, v_set_pu=v_set)
+        )
 
     n_bus = len(buses_list)
 
