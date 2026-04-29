@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-04-29 - Experiment 2b: Gradientenvalidierung example_simple()
+
+### Neue Dateien
+- `experiments/exp02_validate_gradients_example_simple.py` - kompakte
+  AD-vs-Finite-Differences-Validierung fuer das scope-matched pandapower
+  `example_simple()`-Netz
+- `tests/test_exp02_example_simple_gradients_outputs.py` - Schema- und
+  Exporttests fuer das neue Experiment ohne schweren Solverlauf
+
+### Szenarien
+`base`, `load_high`, `sgen_high`
+
+### Untersuchte Eingangsparameter
+- `load_scale_mv_bus_2` - skaliert P und Q der vorhandenen Last an MV Bus 2
+- `sgen_scale_static_generator` - skaliert P und Q des vorhandenen statischen
+  Generators
+- `shunt_q_scale` - skaliert die vorhandene Shunt-Suszeptanz
+- `trafo_x_scale` - skaliert die Serienreaktanz des vorhandenen
+  Zweiwicklungs-Transformators
+
+### Untersuchte Ausgangsobservables
+- `vm_mv_bus_2_pu`
+- `p_slack_mw`
+- `total_p_loss_mw`
+- `p_trafo_hv_mw`
+
+### Exportierte Artefakte
+Alle Dateien werden unter
+`experiments/results/exp02_example_simple_gradients/` geschrieben:
+`gradient_table.csv/json`, `error_summary.csv/json`,
+`fd_step_study.csv/json`, `metadata.json`, `README.md`.
+
+### Bewusste Begrenzung
+Der Pflichtlauf umfasst genau 3 Szenarien x 4 Eingangsparameter x 4
+Ausgangsobservables = 48 Gradienten. Die FD-Schrittweitenstudie ist auf drei
+repraesentative Gradienten beschraenkt.
+
+### Bekannte Einschraenkungen
+- Das aktive `gen` wird im scope-matched Modell als `sgen(P, Q=0)` behandelt.
+- Keine echte PV-Bus-Spannungsregelung, keine Q-Limits, keine PV-PQ-Umschaltung.
+- Keine Controllerlogik und keine vollstaendige pandapower-Generatorsemantik.
+- Die Topologie bleibt konstant; nur kontinuierliche Skalierungsparameter
+  werden untersucht.
+
 ## 2026-04-29 - Experiment 1b: Validierung example_simple()
 
 ### Neue Dateien
