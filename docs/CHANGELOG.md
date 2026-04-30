@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-04-30 - PV-Kopplungspunkt example_simple()
+
+### Neue Dateien
+- `src/diffpf/models/pv.py` - JAX-kompatibles PV-P/Q-Kopplungsinterface mit
+  zentralen Konstanten fuer den `example_simple()`-Kopplungspunkt
+- `experiments/check_pv_coupling_baseline.py` - kleiner
+  Baseline-Reproduktionscheck fuer die Kopplung ohne neues Experiment
+- `tests/test_pv_model.py` - Unit-Tests fuer PV-Leistung, Q/P-Verhaeltnis,
+  Bus-Injektion und Autodiff
+
+### Festlegung
+- Kopplungspunkt: Bus `"MV Bus 2"`
+- Ersetztes Element: sgen `"static generator"`
+- Referenzwerte: `P = 2.0 MW`, `Q = -0.5 MVAr`, `Q/P = -0.25`
+- Der Bus bleibt ein PQ-Bus; die PV-Anlage wird als wetterabhaengige
+  P/Q-Einspeisung modelliert.
+
+### Validierung
+Der Baseline-Check entfernt das vorhandene sgen, injiziert bei
+`G = 1000 W/m^2` und `T_cell = 25 degC` dieselben P/Q-Werte ueber das neue
+JAX-Interface und vergleicht Busspannung, Slack P/Q sowie Wirkleistungsverluste.
+
 ## 2026-04-29 - Experiment 2b: Gradientenvalidierung example_simple()
 
 ### Neue Dateien
