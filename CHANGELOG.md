@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-05-01 - Experiment 3 Visualisierungen aus bestehenden Artefakten
+
+### Neue Dateien
+- `experiments/plot_exp03_figures.py` - erzeugt drei wissenschaftliche
+  Matplotlib-Abbildungen direkt aus den vorhandenen Exp.-3-CSV-Artefakten,
+  ohne neue Power-Flow-Solves oder neue Szenarien zu starten.
+- `tests/test_exp03_plot_outputs.py` - leichte Import-, Filter-, Pivot- und
+  Dateierzeugungstests fuer die Plot-Pipeline.
+
+### Erzeugte Artefakte
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig01_t_amb_sweep_p_slack.png/pdf`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig02_heatmap_g_t_p_slack_base.png/pdf`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig03_sensitivity_p_slack_vs_t_amb.png/pdf`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/README.md`
+
+### Auswertungsumfang
+- Abbildung 1 nutzt `scenario_grid.csv` mit
+  `weather_case_type == "sweep_1d"` und `observable == "p_slack_mw"`.
+- Abbildung 2 nutzt `scenario_grid.csv` mit
+  `weather_case_type == "grid_2d"`, `network_scenario == "base"` und
+  `observable == "p_slack_mw"`.
+- Abbildung 3 nutzt `sensitivity_table.csv` mit
+  `weather_case_type == "sweep_1d"`, `observable == "p_slack_mw"` und
+  `input_parameter == "t_amb_c"`.
+- Die Visualisierung bleibt reine Auswertung bestehender Artefakte; keine
+  Aenderungen am PV-Modell oder numerischen Kern.
+
 ## 2026-05-01 - Experiment 3: Cross-Domain PV Weather Sensitivity
 
 ### Neue Dateien
@@ -403,4 +430,3 @@ line (Pi-Modell), trafo (2-Wicklungs-Pi-Modell mit tap/shift), shunt
 - `docs/architektur.md` enthält eine Datei- und Architekturübersicht.
 - `docs/software_status.txt` enthält einen kompakten Projekt-Snapshot für weitere Chatbot- oder Planungsdialoge.
 - `docs/CHANGELOG.md` wurde als fortlaufender Änderungslog ergänzt.
-

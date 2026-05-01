@@ -229,13 +229,22 @@ Ordner: `experiments/results/exp03_cross_domain_pv_weather/`
 - **Exp. 3** analysiert nur Sensitivitäten (Vorwärts- und Rückwärtsdifferenzierung),
   führt aber keine Optimierungsschleife aus.
 
-## Geplante spätere Visualisierungsideen (noch nicht umgesetzt)
+## Umgesetzte Visualisierung der Artefakte
 
-Diese Visualisierungen sind als mögliche spätere Auswertungsschritte angedacht,
-sind aber **kein Bestandteil des aktuellen Implementierungsschritts**:
+Die Auswertung der bereits berechneten Exp.-3-Artefakte erfolgt ueber
+`experiments/plot_exp03_figures.py`. Das Skript liest ausschliesslich
+`scenario_grid.csv` und `sensitivity_table.csv`; es startet keine neuen
+Power-Flow-Solves und erzeugt keine zusaetzlichen Szenarien.
 
-- Kurven `t_amb_c -> vm_mv_bus_2_pu` für verschiedene Betriebspunkte (1D-Sweep).
-- Heatmap `g_poa_wm2 × t_amb_c -> d_vm/d_g` (Sensitivitätsgitter aus dem 2D-Gitter).
-- Vergleichsgrafik AD-Gradient vs. FD-Gradient für die vier Spot-Check-Fälle.
-- Sensitivitätsbalkendiagramm: welche Wettergröße hat den stärksten Einfluss auf
-  welches Observable?
+Erzeugte Pflichtabbildungen im Ordner
+`experiments/results/exp03_cross_domain_pv_weather/figures/`:
+
+- `fig01_t_amb_sweep_p_slack.png/pdf`: 1D-Sweep
+  `t_amb_c -> p_slack_mw` fuer `base`, `load_low`, `load_high`.
+- `fig02_heatmap_g_t_p_slack_base.png/pdf`: 2D-Heatmap
+  `g_poa_wm2 x t_amb_c -> p_slack_mw` fuer das elektrische Szenario `base`.
+- `fig03_sensitivity_p_slack_vs_t_amb.png/pdf`: lokale Sensitivitaet
+  `d p_slack_mw / d t_amb_c` im 1D-Sweep fuer `base`, `load_low`, `load_high`.
+
+Weitere optionale Visualisierungen, etwa zu `vm_mv_bus_2_pu`,
+AD-vs-FD-Spot-Checks oder Sensitivitaetsbalkendiagrammen, bleiben Future Work.
