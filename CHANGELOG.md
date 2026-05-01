@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-05-01 - Experiment 2 Visualisierungen aus bestehenden Artefakten
+
+### Neue Dateien
+- `experiments/plot_exp02_gradient_figures.py` - erzeugt fuenf
+  publikationsnahe Matplotlib-Abbildungen direkt aus den vorhandenen
+  Exp.-2b-CSV-Artefakten, ohne neue Power-Flow-Solves, Szenarien,
+  AD-Gradienten oder Finite-Difference-Berechnungen zu starten.
+- `tests/test_exp02_plot_outputs.py` - leichte Tests fuer Importierbarkeit,
+  Label-Mapping, robuste Log-Darstellung, Heatmap-Aggregation,
+  Boxplot-Gruppierung, FD-Step-Plot und Figure-Export.
+
+### Erzeugte Artefakte
+- `experiments/results/exp02_example_simple_gradients/figures/fig01_ad_vs_fd_parity_by_observable.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/fig01a_ad_vs_fd_parity_global.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/fig02_gradient_error_heatmap.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/fig03_relative_error_boxplot.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/fig04_fd_step_study.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/fig05_error_by_scenario.png/pdf`
+- `experiments/results/exp02_example_simple_gradients/figures/README.md`
+
+### Aktualisierung Fig. 1
+- Die Haupt-Parity-Abbildung ist jetzt ein facettierter 2x2-Plot nach
+  `output_observable`. Innerhalb jedes Panels werden Eingangsparameter farblich
+  und Szenarien ueber Markerformen unterschieden; `n`, maximaler relativer
+  Fehler und Medianfehler werden je Observable annotiert.
+- Der fruehere globale Parity-Plot bleibt als optionale kompakte Zusatzansicht
+  `fig01a_ad_vs_fd_parity_global.png/pdf` erhalten.
+
+### Datenquellen und Grenzen
+- Gelesen werden ausschliesslich `gradient_table.csv`, `error_summary.csv` und
+  `fd_step_study.csv` unter
+  `experiments/results/exp02_example_simple_gradients/`.
+- Die Plot-Pipeline bleibt reine Auswertung vorhandener Artefakte und haengt
+  damit von deren Spaltenstruktur und numerischer Qualitaet ab.
+- Der numerische JAX-Kern, Solver, Residuen, Observables, Gradient-Check-Logik
+  und der pandapower-Adapter bleiben unveraendert.
+
 ## 2026-05-01 - Experiment 3 Visualisierungen aus bestehenden Artefakten
 
 ### Neue Dateien
