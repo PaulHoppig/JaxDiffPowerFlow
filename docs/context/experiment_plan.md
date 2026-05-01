@@ -159,58 +159,96 @@ Dateien:
 
 ## Experiment 3: Cross-Domain-Sensitivität mit PV-Upstream-Modell
 
+**Status: umgesetzt** – siehe `experiments/exp03_cross_domain_pv_weather.py` und
+`docs/context/experiment_03_plan.md`.
+
 ### Ziel
 
-Nachweis des zentralen Mehrwerts: Sensitivitäten von vorgelagerten, nicht-elektrischen Eingangsgrößen auf elektrische Zielgrößen.
+Nachweis des zentralen Mehrwerts: Sensitivitäten von vorgelagerten, nicht-elektrischen
+Wettergrößen auf elektrische Zielgrößen durch die vollständige Kette Wetter → PV → Netz.
 
 ### Demonstrator
 
-Ausschließlich `example_simple()`.
+Ausschließlich `example_simple()` (scope-matched: `gen` → `sgen(P, Q=0)`).
 
 ### Kopplung
 
-Das `sgen "static generator"` am Bus `"MV Bus 2"` wird aus der statischen Baseline entfernt und durch ein JAX-kompatibles PV-Modell ersetzt.
-
-Kette:
+Das `sgen "static generator"` am Bus `"MV Bus 2"` wird durch das V2-PV-Wettermodell
+ersetzt. Die Kette lautet:
 
 ```text
-Einstrahlung, Zelltemperatur
-    -> PV-Modell
+g_poa_wm2, t_amb_c, wind_ms
+    -> cell_temperature_noct_sam(...)    [NOCT-SAM Zelltemperatur]
+    -> pv_pq_injection_from_weather(...) [PV P/Q-Einspeisung]
     -> P_pv, Q_pv am Bus "MV Bus 2"
     -> NetworkParams
-    -> AC-Power-Flow
+    -> AC-Power-Flow (impliziter Newton-Solver)
     -> elektrische Observables
 ```
 
-### Eingangsgrößen
+### Eingangsgrößen (Pflicht)
 
-- Einstrahlung `G`,
-- Zelltemperatur `T_cell`,
-- optional Leistungsfaktor oder `q_over_p`,
-- optional Curtailment-Faktor.
+- `g_poa_wm2` – Einstrahlungsintensität in W/m²,
+- `t_amb_c` – Umgebungstemperatur in °C,
+- `wind_ms` – Windgeschwindigkeit in m/s.
 
-### Zielgrößen
+### Feste Modellkonstanten
 
-- `|V|` am Bus `"MV Bus 2"`,
-- Slack P/Q,
-- Gesamtverluste,
-- Transformator-HV-Fluss,
-- Leitungsflüsse im MV-Zweig.
+`alpha = 1.0` und `kappa = -0.25` werden in Experiment 3 **nicht variiert**.
+Sie sind feste Konstanten; Sensitivitäten beziehen sich ausschließlich auf Wettergrößen.
+
+### Elektrische Betriebspunkte
+
+- `base` (Lastfaktor 1.00),
+- `load_low` (Lastfaktor 0.75),
+- `load_high` (Lastfaktor 1.25).
+
+### Wetterdesign
+
+- **2D-Gitter:** `g_poa_wm2` ∈ {200, 400, 600, 800, 1000} W/m² × `t_amb_c` ∈
+  {5, 15, 25, 35, 45} °C bei festem `wind_ms = 2.0 m/s` → 25 Fälle.
+- **1D-Temperatursweep (Pflicht-Sweep):** `t_amb_c` ∈ {5, 15, 25, 35, 45, 55} °C
+  bei festem `g_poa_wm2 = 800 W/m²` und `wind_ms = 2.0 m/s` → 6 Fälle.
+- Gesamt: 3 Betriebspunkte × 31 Wetterfälle = **93 Forward-Solves**.
+
+### Pflicht-Observables
+
+- `vm_mv_bus_2_pu` (Spannungsbetrag MV Bus 2),
+- `p_slack_mw` (Slack-Wirkleistung),
+- `total_p_loss_mw` (Gesamtwirkleistungsverluste),
+- `p_trafo_hv_mw` (HV-Trafofluss).
+
+### Pflicht-Sensitivitäten
+
+Lokale Gradienten per reverse-mode AD (implizite Differentiation):
+`d_observable / d_g_poa_wm2`, `d_observable / d_t_amb_c`, `d_observable / d_wind_ms`
+für jedes Pflicht-Observable und jeden (Betriebs-, Wetter-)punkt.
+
+### Methodische Begrenzung
+
+Statt einer vollständigen AD-vs-FD-Validierung (wie in Exp. 2) nur ein
+**gezielter Spot-Check** für 4 repräsentative Wettergradienten (AD vs. zentrales FD).
 
 ### Artefakte
 
-Empfohlen:
+Ordner: `experiments/results/exp03_cross_domain_pv_weather/`
 
-- `scenario_grid.csv/json`: Eingangsszenarien und gelöste Zielgrößen,
-- `sensitivity_table.csv/json`: Gradienten wie `d|V|/dG`, `dP_slack/dG`, `dLoss/dG`,
+- `scenario_grid.csv/json`: Forward-Solve-Ergebnisse (tidy),
+- `sensitivity_table.csv/json`: AD-Sensitivitäten (tidy),
+- `gradient_spotcheck.csv/json`: AD-vs-FD-Spot-Check (tidy),
+- `run_summary.csv/json`: Zusammenfassung pro Betriebspunkt,
 - `metadata.json`,
 - `README.md`.
 
-Visualisierung:
+### Visualisierungen
 
-- Kurven `G -> |V_bus|`,
-- Heatmap `G × T_cell -> Observable`,
-- Sensitivitätskurven über Betriebspunkte.
+Nur als geplante spätere Auswertung, **nicht als Pflicht-Artefakt dieses Schritts**:
+
+- Kurven `t_amb_c -> vm_mv_bus_2_pu` für verschiedene Betriebspunkte,
+- Heatmap `g_poa_wm2 × t_amb_c -> Sensitivität`,
+- Sensitivitätsbalkendiagramm pro Wettereingangsgröße.
+
+Detailplan: `docs/context/experiment_03_plan.md`.
 
 ## Experiment 4: Modularität der Modellkopplung
 

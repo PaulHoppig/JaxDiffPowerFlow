@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-05-01 - Experiment 3: Cross-Domain PV Weather Sensitivity
+
+### Neue Dateien
+- `experiments/exp03_cross_domain_pv_weather.py` - Pflicht-Experiment fuer
+  Wetter-Sensitivitaetsanalyse auf `example_simple()` mit dem V2-PV-Wettermodell.
+  Untersucht die Kette `g_poa_wm2, t_amb_c, wind_ms -> T_cell -> P_pv, Q_pv ->
+  NetworkParams -> AC-Power-Flow -> elektrische Observables`. Deckt 3
+  Betriebspunkte x (25 2D-Gitter + 6 1D-Sweep) = 93 Forward-Solves ab, berechnet
+  1116 AD-Sensitivitaetszeilen und enthaelt einen gezielten AD-vs-FD-Spot-Check
+  fuer 4 repraesentative Wettergradienten.
+- `tests/test_exp03_cross_domain_outputs.py` - Schema- und Smoke-Tests fuer
+  Experiment 3: Importierbarkeit, Spaltendefinitionen, Export-Pipeline und
+  Pflichtartefakte ohne schweren Solver-Vollauf.
+- `docs/context/experiment_03_plan.md` - Detaillierter Experimentplan nur fuer
+  Exp. 3 mit Methodik, Szenariodesign, Artefakten, Grenzen und Zielgroessen.
+
+### Geaenderte Dateien
+- `docs/context/experiment_plan.md` - Exp.-3-Abschnitt aktualisiert: neue
+  Wetterkette mit `g_poa_wm2`, `t_amb_c`, `wind_ms` (statt G + direktem T_cell),
+  1D-Pflichtsweep ueber `t_amb_c`, feste Behandlung von `alpha` und `kappa`,
+  Visualisierungen nur als geplante spaetere Auswertung.
+
+### Modellannahmen Exp. 3
+- PV-Anlage als wetterabhaengige PQ-Einspeisung am Bus `"MV Bus 2"` (kein PV-Bus).
+- `alpha = 1.0` und `kappa = -0.25` als feste Konstanten; keine Variation in Exp. 3.
+- Wettergroessen in fachlichen Einheiten (W/m², °C, m/s) ausserhalb des p.u.-Systems.
+- Scope-matched: aktiver `gen` wird zu `sgen(P, Q=0)` konvertiert.
+- Keine echte PV-Bus-Spannungsregelung, keine Q-Limits, keine PV-PQ-Umschaltung.
+- `wind_adj = wind_ms` in der NOCT-SAM-Formel (keine Hoehen-/Montagekorrektur).
+
+### Artefakte (werden durch Ausfuehren des Skripts erzeugt)
+- `experiments/results/exp03_cross_domain_pv_weather/scenario_grid.csv/json`
+- `experiments/results/exp03_cross_domain_pv_weather/sensitivity_table.csv/json`
+- `experiments/results/exp03_cross_domain_pv_weather/gradient_spotcheck.csv/json`
+- `experiments/results/exp03_cross_domain_pv_weather/run_summary.csv/json`
+- `experiments/results/exp03_cross_domain_pv_weather/metadata.json`
+- `experiments/results/exp03_cross_domain_pv_weather/README.md`
+
 ## 2026-05-01 - PV-Upstream-Modell V2 mit NOCT-SAM-Zelltemperatur
 
 ### Geaenderte Dateien

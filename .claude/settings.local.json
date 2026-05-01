@@ -29,7 +29,8 @@
       "Bash(python -m pytest tests/ -x -q --ignore=tests/test_exp01_example_simple_outputs.py)",
       "Bash(python -m pytest --version)",
       "Bash(py -m pytest --version)",
-      "Bash(python3 -m pytest --version)"
+      "Bash(python3 -m pytest --version)",
+      "Bash(python -m pytest tests/test_exp03_cross_domain_outputs.py -q)"
     ]
   }
 }
