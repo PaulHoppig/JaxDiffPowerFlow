@@ -30,9 +30,8 @@ from diffpf.models.pv import (
     PV_COUPLING_BUS_NAME,
     PV_COUPLING_SGEN_NAME,
     PV_Q_OVER_P,
-    inject_pq_at_bus,
-    pv_power_mw,
-    pv_q_mvar_from_ratio,
+    inject_pv_at_bus,
+    pv_pq_injection,
 )
 from diffpf.solver.newton import NewtonOptions, solve_power_flow_result
 
@@ -194,9 +193,13 @@ def _build_coupled_params(net_without_sgen) -> NetworkParams:
         float(net_without_sgen.sn_mva) if float(net_without_sgen.sn_mva) > 0 else 1.0
     )
 
-    p_mw = pv_power_mw(REFERENCE_IRRADIANCE_W_M2, REFERENCE_CELL_TEMP_C)
-    q_mvar = pv_q_mvar_from_ratio(p_mw)
-    return inject_pq_at_bus(params, bus_idx, p_mw, q_mvar, s_base_mva)
+    injection = pv_pq_injection(
+        irradiance_w_m2=REFERENCE_IRRADIANCE_W_M2,
+        cell_temp_c=REFERENCE_CELL_TEMP_C,
+        alpha=1.0,
+        kappa=PV_Q_OVER_P,
+    )
+    return inject_pv_at_bus(params, bus_idx, injection, s_base_mva)
 
 
 def _compare(original: _SolvedCase, coupled: _SolvedCase) -> list[_BaselineRow]:

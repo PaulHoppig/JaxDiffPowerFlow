@@ -1,8 +1,15 @@
-"""JAX-compatible PV coupling helpers for fixed P/Q bus injections."""
+"""JAX-compatible PV coupling helpers for fixed P/Q bus injections.
+
+The model in this module represents the PV plant in pandapower
+``example_simple()`` as a weather-dependent PQ injection. It is deliberately
+not a voltage-regulating PV bus model: voltage control, Q limits, controller
+logic, and PV-to-PQ switching are outside the current project scope.
+"""
 
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import NamedTuple
 
 import jax.numpy as jnp
 
@@ -13,18 +20,44 @@ PV_COUPLING_SGEN_NAME = "static generator"
 PV_BASE_P_MW = 2.0
 PV_BASE_Q_MVAR = -0.5
 PV_Q_OVER_P = -0.25
+PV_G_REF_W_M2 = 1000.0
+PV_T_REF_C = 25.0
+PV_GAMMA_P_PER_C = -0.004
+PV_ALPHA = 1.0
+
+
+class PVInjection(NamedTuple):
+    """PV active and reactive power injection in physical units.
+
+    Attributes
+    ----------
+    p_pv_mw
+        Active power injected into the network in MW.
+    q_pv_mvar
+        Reactive power injected into the network in MVAr.
+
+    Notes
+    -----
+    Positive values follow generator sign convention. The baseline model uses
+    the explicit ratio ``Q_pv = kappa * P_pv`` rather than a cos(phi)
+    parameterization.
+    """
+
+    p_pv_mw: jnp.ndarray
+    q_pv_mvar: jnp.ndarray
 
 
 def pv_power_mw(
     irradiance_w_m2: jnp.ndarray,
     cell_temp_c: jnp.ndarray,
-    p_stc_mw: float = PV_BASE_P_MW,
-    g_ref_w_m2: float = 1000.0,
-    t_ref_c: float = 25.0,
-    gamma_p_per_c: float = -0.004,
+    alpha: jnp.ndarray = PV_ALPHA,
+    p_ref_mw: float = PV_BASE_P_MW,
+    g_ref_w_m2: float = PV_G_REF_W_M2,
+    t_ref_c: float = PV_T_REF_C,
+    gamma_p_per_c: float = PV_GAMMA_P_PER_C,
+    p_stc_mw: float | None = None,
 ) -> jnp.ndarray:
-    """
-    Compute PV active power from irradiance and cell temperature.
+    """Compute analytical PV active power from irradiance and cell temperature.
 
     Parameters
     ----------
@@ -32,7 +65,9 @@ def pv_power_mw(
         Plane-of-array irradiance in W/m^2.
     cell_temp_c
         PV cell temperature in degree Celsius.
-    p_stc_mw
+    alpha
+        Dimensionless scaling or curtailment factor. The reference value is 1.
+    p_ref_mw
         Active power at reference irradiance and temperature in MW.
     g_ref_w_m2
         Reference irradiance in W/m^2.
@@ -40,39 +75,93 @@ def pv_power_mw(
         Reference cell temperature in degree Celsius.
     gamma_p_per_c
         Relative power temperature coefficient per degree Celsius.
+    p_stc_mw
+        Deprecated alias for ``p_ref_mw`` kept for backwards compatibility.
 
     Returns
     -------
     jnp.ndarray
         Active power injection in MW.
+
+    Notes
+    -----
+    The implemented baseline relation is
+
+    ``P = alpha * P_ref * (G / G_ref) * (1 + gamma * (T_cell - T_ref))``.
+
+    No clipping or saturation is applied. This keeps the reference point exact
+    and leaves any operational limits to explicit outer-model logic.
     """
     irradiance = jnp.asarray(irradiance_w_m2, dtype=jnp.float64)
     cell_temp = jnp.asarray(cell_temp_c, dtype=jnp.float64)
+    alpha_arr = jnp.asarray(alpha, dtype=jnp.float64)
+    p_ref = jnp.asarray(p_ref_mw if p_stc_mw is None else p_stc_mw, dtype=jnp.float64)
     irradiance_factor = irradiance / jnp.asarray(g_ref_w_m2, dtype=jnp.float64)
-    temp_factor = 1.0 + gamma_p_per_c * (cell_temp - t_ref_c)
-    return p_stc_mw * irradiance_factor * temp_factor
+    temp_factor = 1.0 + jnp.asarray(gamma_p_per_c, dtype=jnp.float64) * (
+        cell_temp - jnp.asarray(t_ref_c, dtype=jnp.float64)
+    )
+    return alpha_arr * p_ref * irradiance_factor * temp_factor
 
 
 def pv_q_mvar_from_ratio(
     p_mw: jnp.ndarray,
-    q_over_p: float = PV_Q_OVER_P,
+    kappa: jnp.ndarray = PV_Q_OVER_P,
+    q_over_p: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
-    """
-    Compute reactive PV injection from a fixed Q/P ratio.
+    """Compute reactive PV injection from a fixed Q/P ratio.
 
     Parameters
     ----------
     p_mw
         Active power injection in MW.
-    q_over_p
+    kappa
         Reactive-over-active power ratio.
+    q_over_p
+        Deprecated alias for ``kappa`` kept for backwards compatibility.
 
     Returns
     -------
     jnp.ndarray
         Reactive power injection in MVAr.
     """
-    return jnp.asarray(p_mw, dtype=jnp.float64) * q_over_p
+    ratio = kappa if q_over_p is None else q_over_p
+    return jnp.asarray(p_mw, dtype=jnp.float64) * jnp.asarray(ratio, dtype=jnp.float64)
+
+
+def pv_pq_injection(
+    irradiance_w_m2: jnp.ndarray,
+    cell_temp_c: jnp.ndarray,
+    alpha: jnp.ndarray = PV_ALPHA,
+    kappa: jnp.ndarray = PV_Q_OVER_P,
+    p_ref_mw: float = PV_BASE_P_MW,
+    g_ref_w_m2: float = PV_G_REF_W_M2,
+    t_ref_c: float = PV_T_REF_C,
+    gamma_p_per_c: float = PV_GAMMA_P_PER_C,
+) -> PVInjection:
+    """Return the weather-dependent PV PQ injection in MW/MVAr.
+
+    This is the main upstream-model API for the current scope. It is
+    differentiable with respect to irradiance, cell temperature, ``alpha``, and
+    ``kappa``. The coupling bus remains a PQ bus; the returned values are meant
+    to be written into ``NetworkParams.p_spec_pu`` and ``q_spec_pu`` through an
+    adapter function.
+
+    At ``G = 1000 W/m^2``, ``T_cell = 25 degC``, ``alpha = 1``, and
+    ``kappa = -0.25`` the function reproduces the ``example_simple()`` static
+    generator baseline: ``P = 2.0 MW`` and ``Q = -0.5 MVAr``.
+    """
+
+    p_pv_mw = pv_power_mw(
+        irradiance_w_m2=irradiance_w_m2,
+        cell_temp_c=cell_temp_c,
+        alpha=alpha,
+        p_ref_mw=p_ref_mw,
+        g_ref_w_m2=g_ref_w_m2,
+        t_ref_c=t_ref_c,
+        gamma_p_per_c=gamma_p_per_c,
+    )
+    q_pv_mvar = pv_q_mvar_from_ratio(p_pv_mw, kappa=kappa)
+    return PVInjection(p_pv_mw=p_pv_mw, q_pv_mvar=q_pv_mvar)
 
 
 def inject_pq_at_bus(
@@ -82,8 +171,7 @@ def inject_pq_at_bus(
     q_mvar: jnp.ndarray,
     s_base_mva: float,
 ) -> NetworkParams:
-    """
-    Add a fixed P/Q injection at one bus on the system MVA base.
+    """Add a fixed P/Q injection at one bus on the system MVA base.
 
     The sign convention follows ``NetworkParams``: positive P/Q values are
     generator-sign injections into the network.
@@ -95,4 +183,46 @@ def inject_pq_at_bus(
         params,
         p_spec_pu=params.p_spec_pu.at[bus_idx].add(p_pu),
         q_spec_pu=params.q_spec_pu.at[bus_idx].add(q_pu),
+    )
+
+
+def replace_pq_contribution_at_bus(
+    params: NetworkParams,
+    bus_idx: int,
+    old_p_mw: jnp.ndarray,
+    old_q_mvar: jnp.ndarray,
+    new_p_mw: jnp.ndarray,
+    new_q_mvar: jnp.ndarray,
+    s_base_mva: float,
+) -> NetworkParams:
+    """Replace one known P/Q contribution at a bus by adding its delta.
+
+    This helper is useful when a compiled ``NetworkParams`` still contains the
+    static ``sgen`` baseline and a model output should replace only that
+    element, while preserving other contributions at the same bus such as load.
+    """
+
+    delta_p_mw = jnp.asarray(new_p_mw, dtype=jnp.float64) - jnp.asarray(
+        old_p_mw, dtype=jnp.float64
+    )
+    delta_q_mvar = jnp.asarray(new_q_mvar, dtype=jnp.float64) - jnp.asarray(
+        old_q_mvar, dtype=jnp.float64
+    )
+    return inject_pq_at_bus(params, bus_idx, delta_p_mw, delta_q_mvar, s_base_mva)
+
+
+def inject_pv_at_bus(
+    params: NetworkParams,
+    bus_idx: int,
+    injection: PVInjection,
+    s_base_mva: float,
+) -> NetworkParams:
+    """Add a PV model output to one bus in ``NetworkParams``."""
+
+    return inject_pq_at_bus(
+        params=params,
+        bus_idx=bus_idx,
+        p_mw=injection.p_pv_mw,
+        q_mvar=injection.q_pv_mvar,
+        s_base_mva=s_base_mva,
     )

@@ -9,14 +9,22 @@ from .network import (
     PFState,
 )
 from .pv import (
+    PV_ALPHA,
     PV_BASE_P_MW,
     PV_BASE_Q_MVAR,
     PV_COUPLING_BUS_NAME,
     PV_COUPLING_SGEN_NAME,
+    PV_G_REF_W_M2,
+    PV_GAMMA_P_PER_C,
     PV_Q_OVER_P,
+    PV_T_REF_C,
+    PVInjection,
+    inject_pv_at_bus,
     inject_pq_at_bus,
     pv_power_mw,
+    pv_pq_injection,
     pv_q_mvar_from_ratio,
+    replace_pq_contribution_at_bus,
 )
 
 __all__ = [
@@ -26,12 +34,20 @@ __all__ = [
     "NetworkParams",
     "NetworkSpec",
     "PFState",
+    "PV_ALPHA",
     "PV_BASE_P_MW",
     "PV_BASE_Q_MVAR",
     "PV_COUPLING_BUS_NAME",
     "PV_COUPLING_SGEN_NAME",
+    "PV_G_REF_W_M2",
+    "PV_GAMMA_P_PER_C",
     "PV_Q_OVER_P",
+    "PV_T_REF_C",
+    "PVInjection",
+    "inject_pv_at_bus",
     "inject_pq_at_bus",
     "pv_power_mw",
+    "pv_pq_injection",
     "pv_q_mvar_from_ratio",
+    "replace_pq_contribution_at_bus",
 ]

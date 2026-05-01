@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-05-01 - Analytisches PV-Upstream-Modell fuer example_simple()
+
+### Geaenderte Dateien
+- `src/diffpf/models/pv.py` - analytisches, JAX-kompatibles PV-P/Q-Modell mit
+  `alpha`, explizitem `kappa = Q/P`, `PVInjection`-Rueckgabeobjekt und
+  Adapterhelfern fuer Bus-Injektionen in `NetworkParams`
+- `experiments/check_pv_coupling_baseline.py` - Baseline-Kopplung nutzt das
+  neue gemeinsame PV-P/Q-Interface
+- `tests/test_pv_model.py` - erweitert um Referenzpunkt, Einstrahlungs- und
+  Temperaturverhalten, Q/P-Verhaeltnis, Autodiff und den
+  `example_simple()`-Kopplungspunkt
+- `src/diffpf/models/__init__.py` - neue PV-Modell-API exportiert
+
+### Modellannahmen
+- Die PV-Anlage ersetzt weiterhin das `sgen "static generator"` am Bus
+  `"MV Bus 2"` fachlich als wetterabhaengige PQ-Einspeisung.
+- Der Bus bleibt ein PQ-Bus; es gibt keine echte PV-Bus-Spannungsregelung,
+  keine Q-Limits, keine PV-PQ-Umschaltung und keine Controllerlogik.
+- Das Basismodell verwendet bewusst `Q_pv = kappa * P_pv` statt einer
+  cos(phi)-Parametrisierung.
+- Es wird keine Sattigung oder harte/glatte Begrenzung angewendet, damit der
+  Referenzpunkt exakt und leicht testbar reproduziert wird.
+
 ## 2026-04-30 - PV-Kopplungspunkt example_simple()
 
 ### Neue Dateien
