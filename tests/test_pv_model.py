@@ -15,10 +15,12 @@ from diffpf.models.pv import (
     PV_COUPLING_BUS_NAME,
     PV_COUPLING_SGEN_NAME,
     PV_Q_OVER_P,
+    cell_temperature_noct_sam,
     inject_pq_at_bus,
     inject_pv_at_bus,
     pv_power_mw,
     pv_pq_injection,
+    pv_pq_injection_from_weather,
     pv_q_mvar_from_ratio,
 )
 
@@ -66,6 +68,34 @@ def test_pv_q_from_default_ratio():
     np.testing.assert_allclose(float(q_mvar), -0.5, rtol=0.0, atol=1e-12)
 
 
+def test_cell_temperature_noct_sam_reference_point_is_finite_and_deterministic():
+    t_cell = cell_temperature_noct_sam(800.0, 20.0, 1.0)
+
+    assert jnp.isfinite(t_cell)
+    np.testing.assert_allclose(float(t_cell), 40.0, rtol=0.0, atol=1e-12)
+
+
+def test_cell_temperature_noct_sam_increases_with_irradiance():
+    low = cell_temperature_noct_sam(500.0, 20.0, 1.0)
+    high = cell_temperature_noct_sam(900.0, 20.0, 1.0)
+
+    assert float(high) > float(low)
+
+
+def test_cell_temperature_noct_sam_increases_with_ambient_temperature():
+    cool = cell_temperature_noct_sam(800.0, 10.0, 1.0)
+    warm = cell_temperature_noct_sam(800.0, 25.0, 1.0)
+
+    assert float(warm) > float(cool)
+
+
+def test_cell_temperature_noct_sam_decreases_with_wind_speed():
+    calm = cell_temperature_noct_sam(800.0, 20.0, 0.5)
+    windy = cell_temperature_noct_sam(800.0, 20.0, 5.0)
+
+    assert float(windy) < float(calm)
+
+
 def test_pv_power_increases_with_irradiance():
     low = pv_power_mw(600.0, 25.0)
     high = pv_power_mw(900.0, 25.0)
@@ -78,6 +108,13 @@ def test_pv_power_decreases_with_temperature_for_negative_gamma():
     hot = pv_power_mw(1000.0, 45.0)
 
     assert float(hot) < float(cool)
+
+
+def test_weather_based_pv_power_decreases_when_noct_cell_temperature_rises():
+    cool_weather = pv_pq_injection_from_weather(1000.0, 15.0, 1.0)
+    hot_weather = pv_pq_injection_from_weather(1000.0, 35.0, 1.0)
+
+    assert float(hot_weather.p_pv_mw) < float(cool_weather.p_pv_mw)
 
 
 def test_pv_q_over_p_ratio_matches_kappa():
@@ -101,6 +138,25 @@ def test_pv_power_gradients_have_plausible_signs():
     assert float(grad_t) < 0.0
 
 
+def test_cell_temperature_noct_sam_gradients_are_finite():
+    grad_g = jax.grad(lambda g: cell_temperature_noct_sam(g, 20.0, 1.0))(
+        jnp.asarray(800.0)
+    )
+    grad_t = jax.grad(lambda t: cell_temperature_noct_sam(800.0, t, 1.0))(
+        jnp.asarray(20.0)
+    )
+    grad_w = jax.grad(lambda w: cell_temperature_noct_sam(800.0, 20.0, w))(
+        jnp.asarray(1.0)
+    )
+
+    assert jnp.isfinite(grad_g)
+    assert jnp.isfinite(grad_t)
+    assert jnp.isfinite(grad_w)
+    assert float(grad_g) > 0.0
+    assert float(grad_t) > 0.0
+    assert float(grad_w) < 0.0
+
+
 def test_pv_pq_injection_is_differentiable_in_alpha_and_kappa():
     grad_alpha = jax.grad(
         lambda alpha: pv_pq_injection(1000.0, 25.0, alpha=alpha).p_pv_mw
@@ -118,6 +174,17 @@ def test_pv_pq_injection_is_differentiable_in_alpha_and_kappa():
     np.testing.assert_allclose(
         float(grad_kappa),
         PV_BASE_P_MW,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_weather_based_pv_injection_preserves_q_over_p_ratio():
+    injection = pv_pq_injection_from_weather(850.0, 18.0, 2.0, kappa=-0.3)
+
+    np.testing.assert_allclose(
+        float(injection.q_pv_mvar / injection.p_pv_mw),
+        -0.3,
         rtol=1e-12,
         atol=1e-12,
     )

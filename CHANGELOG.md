@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-05-01 - PV-Upstream-Modell V2 mit NOCT-SAM-Zelltemperatur
+
+### Geaenderte Dateien
+- `src/diffpf/models/pv.py` - JAX-kompatible
+  `cell_temperature_noct_sam(...)`-Funktion und
+  `pv_pq_injection_from_weather(...)` als additive Wetter-API ergaenzt
+- `src/diffpf/models/__init__.py` - neue NOCT-SAM-Konstanten und Funktionen
+  exportiert
+- `tests/test_pv_model.py` - Tests fuer Zelltemperatur-Referenzpunkt,
+  Monotonien gegenueber Einstrahlung, Umgebungstemperatur und Wind,
+  Autodiff sowie wetterbasierte P/Q-Injektion ergaenzt
+
+### Modellannahmen
+- Die bestehende V1-API mit explizitem `T_cell` bleibt erhalten.
+- Wettergroessen bleiben in fachlichen Einheiten
+  (`g_poa_wm2`, `t_amb_c`, `wind_ms`) und werden nicht in das p.u.-System des
+  Netzkerns verschoben.
+- In der ersten NOCT-SAM-Variante gilt bewusst `wind_adj = wind_ms`; es gibt
+  keine Hoehen-, Montage- oder Anlagenkorrektur.
+- Die elektrische Kopplung bleibt unveraendert: PQ-Einspeisung am Bus
+  `"MV Bus 2"` mit `Q_pv = kappa * P_pv`, keine PV-Bus-Regelung, keine
+  Q-Limits, keine PV-PQ-Umschaltung und keine Controllerlogik.
+- Es wird weiterhin keine harte oder glatte Saettigungslogik angewendet.
+
 ## 2026-05-01 - Analytisches PV-Upstream-Modell fuer example_simple()
 
 ### Geaenderte Dateien

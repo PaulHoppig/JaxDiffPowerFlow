@@ -24,6 +24,9 @@ PV_G_REF_W_M2 = 1000.0
 PV_T_REF_C = 25.0
 PV_GAMMA_P_PER_C = -0.004
 PV_ALPHA = 1.0
+PV_NOCT_ADJ_C = 45.0
+PV_ETA_REF = 0.18
+PV_TAU_ALPHA = 0.90
 
 
 class PVInjection(NamedTuple):
@@ -103,6 +106,60 @@ def pv_power_mw(
     return alpha_arr * p_ref * irradiance_factor * temp_factor
 
 
+def cell_temperature_noct_sam(
+    g_poa_wm2: jnp.ndarray,
+    t_amb_c: jnp.ndarray,
+    wind_ms: jnp.ndarray,
+    t_noct_adj_c: float = PV_NOCT_ADJ_C,
+    eta_ref: float = PV_ETA_REF,
+    tau_alpha: float = PV_TAU_ALPHA,
+) -> jnp.ndarray:
+    """Estimate PV cell temperature with a reduced NOCT-SAM relation.
+
+    Parameters
+    ----------
+    g_poa_wm2
+        Plane-of-array irradiance in W/m^2.
+    t_amb_c
+        Ambient air temperature in degree Celsius.
+    wind_ms
+        Wind speed in m/s. In this first model version, ``wind_adj = wind_ms``;
+        no height or mounting correction is applied.
+    t_noct_adj_c
+        Adjusted nominal operating cell temperature in degree Celsius.
+    eta_ref
+        Reference module efficiency as a fraction.
+    tau_alpha
+        Effective transmittance-absorptance product as a fraction.
+
+    Returns
+    -------
+    jnp.ndarray
+        Estimated cell temperature in degree Celsius.
+
+    Notes
+    -----
+    The implemented reduced NOCT-SAM form is
+
+    ``T_cell = T_amb + (G_poa / 800) * (T_noct_adj - 20)
+    * (1 - eta_ref / tau_alpha) * 9.5 / (5.7 + 3.8 * wind_adj)``.
+
+    Inputs remain in meteorological units and are not converted to the
+    electrical per-unit system. No clipping is applied.
+    """
+
+    irradiance = jnp.asarray(g_poa_wm2, dtype=jnp.float64)
+    ambient = jnp.asarray(t_amb_c, dtype=jnp.float64)
+    wind_adj = jnp.asarray(wind_ms, dtype=jnp.float64)
+    noct_delta = jnp.asarray(t_noct_adj_c, dtype=jnp.float64) - 20.0
+    heat_fraction = 1.0 - (
+        jnp.asarray(eta_ref, dtype=jnp.float64)
+        / jnp.asarray(tau_alpha, dtype=jnp.float64)
+    )
+    wind_factor = 9.5 / (5.7 + 3.8 * wind_adj)
+    return ambient + (irradiance / 800.0) * noct_delta * heat_fraction * wind_factor
+
+
 def pv_q_mvar_from_ratio(
     p_mw: jnp.ndarray,
     kappa: jnp.ndarray = PV_Q_OVER_P,
@@ -162,6 +219,48 @@ def pv_pq_injection(
     )
     q_pv_mvar = pv_q_mvar_from_ratio(p_pv_mw, kappa=kappa)
     return PVInjection(p_pv_mw=p_pv_mw, q_pv_mvar=q_pv_mvar)
+
+
+def pv_pq_injection_from_weather(
+    g_poa_wm2: jnp.ndarray,
+    t_amb_c: jnp.ndarray,
+    wind_ms: jnp.ndarray,
+    alpha: jnp.ndarray = PV_ALPHA,
+    kappa: jnp.ndarray = PV_Q_OVER_P,
+    p_ref_mw: float = PV_BASE_P_MW,
+    g_ref_w_m2: float = PV_G_REF_W_M2,
+    t_ref_c: float = PV_T_REF_C,
+    gamma_p_per_c: float = PV_GAMMA_P_PER_C,
+    t_noct_adj_c: float = PV_NOCT_ADJ_C,
+    eta_ref: float = PV_ETA_REF,
+    tau_alpha: float = PV_TAU_ALPHA,
+) -> PVInjection:
+    """Return PV PQ injection from irradiance, ambient temperature, and wind.
+
+    This V2 helper keeps the V1 electrical coupling unchanged. It first
+    computes cell temperature with :func:`cell_temperature_noct_sam`, then
+    evaluates the same analytical active-power model used by
+    :func:`pv_pq_injection` and finally applies ``Q_pv = kappa * P_pv``.
+    """
+
+    cell_temp_c = cell_temperature_noct_sam(
+        g_poa_wm2=g_poa_wm2,
+        t_amb_c=t_amb_c,
+        wind_ms=wind_ms,
+        t_noct_adj_c=t_noct_adj_c,
+        eta_ref=eta_ref,
+        tau_alpha=tau_alpha,
+    )
+    return pv_pq_injection(
+        irradiance_w_m2=g_poa_wm2,
+        cell_temp_c=cell_temp_c,
+        alpha=alpha,
+        kappa=kappa,
+        p_ref_mw=p_ref_mw,
+        g_ref_w_m2=g_ref_w_m2,
+        t_ref_c=t_ref_c,
+        gamma_p_per_c=gamma_p_per_c,
+    )
 
 
 def inject_pq_at_bus(
