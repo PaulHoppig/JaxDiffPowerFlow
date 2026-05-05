@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-05-05 - Experiment 4: Modulare Upstream-Kopplung mit NN-PQ-Surrogat
+
+### Neue Dateien
+- `src/diffpf/models/pq_surrogate.py` - kleines JAX-only MLP als P-only
+  Upstream-Surrogat ohne Equinox/Flax/Optax; `Q = kappa * P` bleibt fest.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` - direkt ausfuehrbares
+  Experiment 4 mit synthetischer Distillation des analytischen PV-Wettermodells,
+  Modellvergleich, Kopplungsnachweis, AD-vs-FD-Spotchecks und
+  Sensitivitaetsmustervergleich.
+- `tests/test_pq_surrogate_model.py` - Modelltests fuer deterministische
+  Initialisierung, Shape/Finite-Werte, Q/P-Verhaeltnis, JIT, Gradienten,
+  Parameterzahl und pandapower-freies Modellmodul.
+- `tests/test_exp04_modular_surrogate_outputs.py` - leichte Schema- und
+  Exporttests fuer die Exp.-4-Artefakte sowie ein Mini-Training-Smoke-Test.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - wissenschaftlicher Plan
+  fuer Ziel, Architektur, Datensatz, Kopplung, Artefakte und Grenzen.
+
+### Geaenderte Dateien
+- `src/diffpf/models/__init__.py` - Surrogatmodell-API exportiert.
+
+### Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+
+### Tests
+- Vorgesehen: `python -m pytest tests/test_pq_surrogate_model.py tests/test_exp04_modular_surrogate_outputs.py`
+- Vorgesehen: `python -m pytest tests/test_pv_model.py tests/test_exp03_cross_domain_outputs.py`
+
+### Modellannahmen und Grenzen
+- Das NN ist ein kleines Distillation-Surrogat fuer Modularitaet, kein
+  Messdaten-Prognosemodell.
+- Hauptpfad ist P-only; Blindleistung folgt deterministisch aus
+  `Q = -0.25 * P`.
+- Alle Upstream-Modelle nutzen denselben P/Q-Injektionsadapter und denselben
+  unveraenderten Power-Flow-Kern.
+- Keine echte PV-Bus-Spannungsregelung, keine Q-Limits, keine
+  PV-PQ-Umschaltung und keine Controllerlogik.
+
+## 2026-05-04 - Experiment 3 Plot-Verbesserungen
+
+### Geaenderte Dateien
+- `experiments/plot_exp03_figures.py` - berichtstauglichere Replots der drei
+  bestehenden Exp.-3-Figuren aus den vorhandenen CSV-Artefakten: feste
+  Sweep-/Grid-Ticks, klarere Achsenlabels, Slack-Vorzeichenhinweis,
+  diskrete 5x5-Heatmap-Zellen und Fig.-3-Sensitivitaet in kW/degC.
+  Die Heatmap verwendet nur noch einen Haupttitel; Fig. 3 ist wieder der
+  Temperatursweep-Linienplot je Szenario.
+- `tests/test_exp03_plot_outputs.py` - leichte Tests fuer die festen
+  Darstellungs-Ticks, die Umrechnung der Fig.-3-Sensitivitaeten von
+  MW/degC nach kW/degC.
+- `experiments/results/exp03_cross_domain_pv_weather/figures/README.md` -
+  aktualisierte Datenquellen, Filter, Vorzeichenkonvention und
+  Einheitentransformation dokumentiert.
+
+### Grenzen
+- Es wurden keine neuen Power-Flow-Solves, Szenarien, AD-Sensitivitaeten oder
+  Finite-Difference-Berechnungen gestartet.
+- Die Plot-Erzeugung bleibt reine Auswertung von `scenario_grid.csv` und
+  `sensitivity_table.csv`; die Ergebnisdaten selbst bleiben unveraendert.
+
 ## 2026-05-01 - Experiment 2 Visualisierungen aus bestehenden Artefakten
 
 ### Neue Dateien

@@ -52,6 +52,12 @@ def test_grid_2d_pivot_has_expected_shape(plot_module):
     assert matrix.shape == (5, 5)
 
 
+def test_report_ticks_match_experiment_design(plot_module):
+    assert plot_module.SWEEP_T_AMB_TICKS == (5, 15, 25, 35, 45, 55)
+    assert plot_module.GRID_G_POA_TICKS == (200, 400, 600, 800, 1000)
+    assert plot_module.GRID_T_AMB_TICKS == (5, 15, 25, 35, 45)
+
+
 def test_sensitivity_filter_returns_temperature_gradient(plot_module):
     _, sensitivity_rows = plot_module.load_artifacts()
     grouped = plot_module.select_fig03_rows(sensitivity_rows)
@@ -65,6 +71,19 @@ def test_sensitivity_filter_returns_temperature_gradient(plot_module):
         for rows in grouped.values()
         for row in rows
     )
+
+
+def test_sensitivity_values_are_converted_to_kw_per_degree(plot_module):
+    rows = [{"value": "0.0065"}, {"value": "-0.001"}]
+
+    assert plot_module.sensitivity_values_kw_per_c(rows) == [6.5, -1.0]
+
+
+def test_padded_limits_zoom_around_gradient_values(plot_module):
+    lower, upper = plot_module.padded_limits([6.3, 6.5, 6.7], pad_fraction=0.25)
+
+    assert lower == pytest.approx(6.2)
+    assert upper == pytest.approx(6.8)
 
 
 def test_generate_figures_writes_expected_files(plot_module, tmp_path: Path):

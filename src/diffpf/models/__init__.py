@@ -31,6 +31,18 @@ from .pv import (
     pv_q_mvar_from_ratio,
     replace_pq_contribution_at_bus,
 )
+from .pq_surrogate import (
+    DEFAULT_TRAINING_CONFIG,
+    DEFAULT_WEATHER_NORMALIZATION,
+    MLPParams,
+    SurrogateTrainingConfig,
+    WeatherInputNormalization,
+    count_mlp_parameters,
+    init_mlp_params,
+    mlp_apply,
+    neural_pq_injection_from_weather,
+    normalize_weather_inputs,
+)
 
 __all__ = [
     "BusSpec",
@@ -60,4 +72,14 @@ __all__ = [
     "pv_pq_injection_from_weather",
     "pv_q_mvar_from_ratio",
     "replace_pq_contribution_at_bus",
+    "DEFAULT_TRAINING_CONFIG",
+    "DEFAULT_WEATHER_NORMALIZATION",
+    "MLPParams",
+    "SurrogateTrainingConfig",
+    "WeatherInputNormalization",
+    "count_mlp_parameters",
+    "init_mlp_params",
+    "mlp_apply",
+    "neural_pq_injection_from_weather",
+    "normalize_weather_inputs",
 ]

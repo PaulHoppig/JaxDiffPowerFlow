@@ -28,6 +28,11 @@ RESULTS_DIR = (
 FIGURES_DIR = RESULTS_DIR / "figures"
 
 SCENARIO_ORDER = ("base", "load_low", "load_high")
+SWEEP_T_AMB_TICKS = (5, 15, 25, 35, 45, 55)
+GRID_G_POA_TICKS = (200, 400, 600, 800, 1000)
+GRID_T_AMB_TICKS = (5, 15, 25, 35, 45)
+SLACK_SIGN_NOTE = "negative = export to upstream grid"
+SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $v_{wind} = 2$ m/s"
 
 SCENARIO_GRID_REQUIRED_COLUMNS = {
     "network_scenario",
@@ -95,6 +100,15 @@ def _plot_export(fig, stem: str, figures_dir: Path) -> tuple[Path, Path]:
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
     return png_path, pdf_path
+
+
+def _scenario_label(scenario: str) -> str:
+    labels = {
+        "base": "Base",
+        "load_low": "Low load",
+        "load_high": "High load",
+    }
+    return labels.get(scenario, scenario)
 
 
 def _rows_for_scenario(
@@ -181,6 +195,29 @@ def _coordinate_edges(values: list[float]) -> np.ndarray:
     return np.concatenate([[first], mids, [last]])
 
 
+def sensitivity_values_kw_per_c(rows: list[dict]) -> list[float]:
+    """Return sensitivity values converted from MW/degC to kW/degC."""
+
+    return [1000.0 * _as_float(row, "value") for row in rows]
+
+
+def padded_limits(values: list[float], pad_fraction: float = 0.25) -> tuple[float, float]:
+    """Return finite display limits with padding around the data range."""
+
+    arr = np.asarray(values, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return -1.0, 1.0
+
+    lower = float(np.min(finite))
+    upper = float(np.max(finite))
+    if lower == upper:
+        pad = max(abs(lower) * 0.05, 1e-6)
+    else:
+        pad = pad_fraction * (upper - lower)
+    return lower - pad, upper + pad
+
+
 def pivot_grid_2d_base_p_slack(
     scenario_rows: list[dict],
 ) -> tuple[list[float], list[float], np.ndarray]:
@@ -231,13 +268,31 @@ def plot_fig01_t_amb_sweep_p_slack(
         rows = grouped[scenario]
         x = [_as_float(row, "t_amb_c") for row in rows]
         y = [_as_float(row, "value") for row in rows]
-        ax.plot(x, y, marker="o", linewidth=1.6, label=scenario)
+        ax.plot(
+            x,
+            y,
+            marker="o",
+            markersize=4.2,
+            linewidth=1.6,
+            label=_scenario_label(scenario),
+        )
 
-    ax.set_xlabel("Ambient temperature $T_{amb}$ [degC]")
+    ax.set_xticks(SWEEP_T_AMB_TICKS)
+    ax.set_xlabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
     ax.set_ylabel("Slack active power $P_{slack}$ [MW]")
-    ax.legend(title="Scenario")
+    ax.set_title(SWEEP_FIXED_WEATHER_LABEL, fontsize=10)
+    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    ax.text(
+        0.01,
+        -0.22,
+        SLACK_SIGN_NOTE,
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8,
+    )
+    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
     return _plot_export(fig, "fig01_t_amb_sweep_p_slack", figures_dir)
 
 
@@ -251,14 +306,31 @@ def plot_fig02_heatmap_g_t_p_slack_base(
     g_edges = _coordinate_edges(g_values)
     t_edges = _coordinate_edges(t_values)
 
-    fig, ax = plt.subplots(figsize=(6.3, 4.5))
-    mesh = ax.pcolormesh(g_edges, t_edges, matrix, shading="auto")
+    fig, ax = plt.subplots(figsize=(6.6, 4.8), constrained_layout=True)
+    mesh = ax.pcolormesh(
+        g_edges,
+        t_edges,
+        matrix,
+        shading="flat",
+        edgecolors="white",
+        linewidth=0.55,
+    )
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label("Slack active power $P_{slack}$ [MW]")
-    ax.set_xlabel("Plane-of-array irradiance $G_{poa}$ [W/m^2]")
-    ax.set_ylabel("Ambient temperature $T_{amb}$ [degC]")
-    ax.set_title("Base scenario")
-    fig.tight_layout()
+    ax.set_xticks(GRID_G_POA_TICKS)
+    ax.set_yticks(GRID_T_AMB_TICKS)
+    ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
+    ax.set_title("Base scenario: Slack active power over weather grid", fontsize=10)
+    ax.text(
+        0.01,
+        -0.20,
+        SLACK_SIGN_NOTE,
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8,
+    )
     return _plot_export(fig, "fig02_heatmap_g_t_p_slack_base", figures_dir)
 
 
@@ -270,15 +342,33 @@ def plot_fig03_sensitivity_p_slack_vs_t_amb(
 
     grouped = select_fig03_rows(sensitivity_rows)
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    all_y: list[float] = []
     for scenario in SCENARIO_ORDER:
         rows = grouped[scenario]
         x = [_as_float(row, "t_amb_c") for row in rows]
-        y = [_as_float(row, "value") for row in rows]
-        ax.plot(x, y, marker="o", linewidth=1.6, label=scenario)
+        y = sensitivity_values_kw_per_c(rows)
+        all_y.extend(y)
+        ax.plot(
+            x,
+            y,
+            marker="o",
+            markersize=4.2,
+            linewidth=1.6,
+            label=_scenario_label(scenario),
+        )
 
-    ax.set_xlabel("Ambient temperature $T_{amb}$ [degC]")
-    ax.set_ylabel(r"$dP_{slack} / dT_{amb}$ [MW/degC]")
-    ax.legend(title="Scenario")
+    ax.set_ylim(*padded_limits(all_y, pad_fraction=0.30))
+
+    ax.set_xticks(SWEEP_T_AMB_TICKS)
+    ax.set_xlabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
+    ax.set_ylabel(
+        r"Local sensitivity $\partial P_{slack} / \partial T_{amb}$ [kW/$^\circ$C]"
+    )
+    ax.set_title(
+        r"Local AD sensitivity at $G_{poa} = 800$ W/m$^2$, $v_{wind} = 2$ m/s",
+        fontsize=10,
+    )
+    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     return _plot_export(fig, "fig03_sensitivity_p_slack_vs_t_amb", figures_dir)
@@ -302,7 +392,8 @@ run by the plotting script.
 Files: `fig01_t_amb_sweep_p_slack.png` and `fig01_t_amb_sweep_p_slack.pdf`.
 Data source: `scenario_grid.csv`. Filter:
 `weather_case_type == "sweep_1d"` and `observable == "p_slack_mw"`.
-Lines compare `base`, `load_low`, and `load_high` over `t_amb_c`.
+Lines compare `base`, `load_low`, and `load_high` over `t_amb_c` at fixed
+`g_poa_wm2 = 800` and `wind_ms = 2`.
 
 ## Figure 2
 
@@ -310,7 +401,7 @@ Files: `fig02_heatmap_g_t_p_slack_base.png` and
 `fig02_heatmap_g_t_p_slack_base.pdf`. Data source: `scenario_grid.csv`.
 Filter: `weather_case_type == "grid_2d"`, `network_scenario == "base"`, and
 `observable == "p_slack_mw"`. Values are pivoted to a
-`t_amb_c x g_poa_wm2` matrix.
+`t_amb_c x g_poa_wm2` matrix and displayed as a discrete 5 x 5 weather grid.
 
 ## Figure 3
 
@@ -318,7 +409,14 @@ Files: `fig03_sensitivity_p_slack_vs_t_amb.png` and
 `fig03_sensitivity_p_slack_vs_t_amb.pdf`. Data source:
 `sensitivity_table.csv`. Filter: `weather_case_type == "sweep_1d"`,
 `observable == "p_slack_mw"`, and `input_parameter == "t_amb_c"`.
-Lines compare `base`, `load_low`, and `load_high`.
+Lines compare `base`, `load_low`, and `load_high` over `t_amb_c`. The raw
+artifact stores sensitivities in MW/degC; the figure converts them to kW/degC
+by multiplying `value` by 1000.
+
+## Sign convention
+
+For all slack active-power plots, negative `P_slack` values denote export to
+the upstream grid.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
