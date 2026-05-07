@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-05-07 - Experiment 2 Gradientengroessen-vs-Fehler-Heatmaps
+
+### Geaenderte Dateien
+- `experiments/plot_exp02_gradient_figures.py` - Aggregation der
+  Gradientengroessen und relativen AD-vs-FD-Fehler je
+  Input-/Output-Kombination ergaenzt; neue Fig. 6 mit zwei diskreten Heatmaps
+  fuer `log10(median |AD gradient|)` und `log10(max relative error)` erzeugt.
+- `tests/test_exp02_plot_outputs.py` - Tests fuer Aggregation, robuste
+  Log-Floors, Fig.-6-Export, Colorbar-Labels und README-Abschnitt ergaenzt.
+- `experiments/results/exp02_example_simple_gradients/figures/README.md` -
+  Fig.-6-Datenquelle, Interpretation und Grenzen dokumentiert.
+
+### Neue Artefakte
+- `experiments/results/exp02_example_simple_gradients/figures/gradient_magnitude_vs_error_summary.csv`
+- `experiments/results/exp02_example_simple_gradients/figures/gradient_magnitude_vs_error_summary.json`
+- `experiments/results/exp02_example_simple_gradients/figures/fig06_gradient_magnitude_vs_relative_error_heatmaps.png`
+- `experiments/results/exp02_example_simple_gradients/figures/fig06_gradient_magnitude_vs_relative_error_heatmaps.pdf`
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp02_gradient_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp02_plot_outputs.py`
+  (19 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp02_example_simple_gradients_outputs.py`
+  (8 passed)
+
+### Grenzen
+- Reine Re-Visualisierung vorhandener CSV-Artefakte.
+- Keine neuen Power-Flow-Solves, keine neuen AD-Gradienten, keine neuen
+  Finite-Difference-Laeufe und keine Aenderung an Ergebnisdaten oder
+  numerischem Kern.
+
+## 2026-05-07 - Experiment 2 Heatmap an Experiment-3-Darstellung angeglichen
+
+### Geaenderte Dateien
+- `experiments/plot_exp02_gradient_figures.py` - Fig. 2 wird weiterhin aus
+  `gradient_table.csv` aggregiert, aber nun als diskrete Matplotlib-Heatmap mit
+  sichtbaren Zellgrenzen, klarem Titel, stabilerem Layout,
+  Achsenbeschriftungen und gut lesbarer Colorbar erzeugt.
+- `tests/test_exp02_plot_outputs.py` - Tests fuer Titel, Achsenlabels,
+  Colorbar-Beschriftung und Heatmap-Dateiexport ergaenzt.
+- `experiments/results/exp02_example_simple_gradients/figures/README.md` -
+  Fig.-2-Beschreibung um log10-Darstellung, getrennte Zellen und den
+  Artefakt-only-Charakter ergaenzt.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp02_example_simple_gradients/figures/fig02_gradient_error_heatmap.png`
+- `experiments/results/exp02_example_simple_gradients/figures/fig02_gradient_error_heatmap.pdf`
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp02_gradient_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp02_plot_outputs.py`
+  (12 passed)
+- Optional ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_plot_outputs.py`
+  (8 passed, 1 bestehender Exp.-3-Fehler wegen fehlendem `padded_limits` in
+  `experiments.plot_exp03_figures`)
+
+### Grenzen
+- Reine Re-Visualisierung vorhandener Exp.-2-Artefakte.
+- Keine neuen Power-Flow-Solves, keine neuen AD-Gradienten, keine neuen
+  Finite-Difference-Laeufe und keine Aenderung an Ergebnisdaten oder
+  numerischer Kernlogik.
+
 ## 2026-05-07 - Experiment 1 Visualisierungen aus bestehenden Artefakten
 
 ### Neue Dateien

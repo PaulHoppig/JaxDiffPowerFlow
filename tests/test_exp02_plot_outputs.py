@@ -40,6 +40,39 @@ def _sample_gradient_df() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _full_sample_gradient_df(plot_module) -> pd.DataFrame:
+    rows = []
+    for input_idx, input_parameter in enumerate(plot_module.INPUT_ORDER, start=1):
+        for output_idx, observable in enumerate(plot_module.OBSERVABLE_ORDER, start=1):
+            for scenario_idx, scenario in enumerate(plot_module.SCENARIO_ORDER, start=1):
+                ad = float(input_idx * output_idx * scenario_idx)
+                rel_error = 1e-8 * input_idx * output_idx * scenario_idx
+                if (
+                    input_parameter == "load_scale_mv_bus_2"
+                    and observable == "vm_mv_bus_2_pu"
+                ):
+                    ad = float((-1) ** scenario_idx * scenario_idx)
+                    rel_error = 1e-8 * scenario_idx
+                if (
+                    input_parameter == "trafo_x_scale"
+                    and observable == "p_trafo_hv_mw"
+                ):
+                    ad = 0.0
+                    rel_error = 0.0
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "input_parameter": input_parameter,
+                        "output_observable": observable,
+                        "ad_grad": ad,
+                        "fd_grad": ad,
+                        "abs_error": 0.0,
+                        "rel_error": rel_error,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
 def _sample_fd_step_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -119,6 +152,86 @@ def test_heatmap_aggregation_works_with_small_dataframe(plot_module):
     assert np.isfinite(matrix).all()
 
 
+def test_heatmap_figure_has_report_labels(plot_module):
+    fig, ax = plot_module.build_error_heatmap_figure(_sample_gradient_df())
+
+    try:
+        assert ax.get_title() == "Experiment 2: max AD-vs-FD relative gradient error"
+        assert ax.get_xlabel() == "Input parameter"
+        assert ax.get_ylabel() == "Output observable"
+        colorbar_labels = [axis.get_ylabel() for axis in fig.axes[1:]]
+        assert "log10(max relative error)" in colorbar_labels
+    finally:
+        plot_module.plt.close(fig)
+
+
+def test_gradient_magnitude_error_comparison_table_shape_and_columns(plot_module):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+
+    assert len(summary) == 16
+    for column in plot_module.GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS:
+        assert column in summary.columns
+
+
+def test_gradient_magnitude_error_comparison_table_values(plot_module):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+    row = summary[
+        (summary["input_parameter"] == "load_scale_mv_bus_2")
+        & (summary["output_observable"] == "vm_mv_bus_2_pu")
+    ].iloc[0]
+
+    assert row["n"] == 3
+    assert row["median_abs_ad_grad"] == pytest.approx(2.0)
+    assert row["min_abs_ad_grad"] == pytest.approx(1.0)
+    assert row["max_abs_ad_grad"] == pytest.approx(3.0)
+    assert row["median_rel_error"] == pytest.approx(2e-8)
+    assert row["max_rel_error"] == pytest.approx(3e-8)
+    assert row["log10_median_abs_ad_grad"] == pytest.approx(np.log10(2.0))
+    assert row["log10_max_rel_error"] == pytest.approx(np.log10(3e-8))
+
+
+def test_gradient_magnitude_error_comparison_table_log_floor(plot_module):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+    row = summary[
+        (summary["input_parameter"] == "trafo_x_scale")
+        & (summary["output_observable"] == "p_trafo_hv_mw")
+    ].iloc[0]
+
+    assert row["median_abs_ad_grad"] == 0.0
+    assert row["max_rel_error"] == 0.0
+    assert np.isfinite(row["log10_median_abs_ad_grad"])
+    assert np.isfinite(row["log10_max_rel_error"])
+    assert row["log10_median_abs_ad_grad"] == pytest.approx(
+        np.log10(plot_module.EPS_LOG)
+    )
+    assert row["log10_max_rel_error"] == pytest.approx(np.log10(plot_module.EPS_LOG))
+
+
+def test_gradient_magnitude_vs_error_figure_has_two_heatmaps_and_colorbars(
+    plot_module,
+):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+    fig, axes = plot_module.build_gradient_magnitude_vs_relative_error_figure(summary)
+
+    try:
+        assert len(axes) == 2
+        assert axes[0].get_title() == "Gradient magnitude"
+        assert axes[1].get_title() == "Relative gradient error"
+        colorbar_labels = [axis.get_ylabel() for axis in fig.axes[2:]]
+        assert "log10(median |AD gradient|)" in colorbar_labels
+        assert "log10(max relative error)" in colorbar_labels
+    finally:
+        plot_module.plt.close(fig)
+
+
 def test_boxplot_grouping_by_observable(plot_module):
     observables, groups = plot_module.grouped_relative_errors_by_observable(
         _sample_gradient_df()
@@ -153,6 +266,57 @@ def test_faceted_parity_plot_writes_files(plot_module, tmp_path: Path):
     assert pdf_path.exists()
     assert png_path.stat().st_size > 0
     assert pdf_path.stat().st_size > 0
+
+
+def test_heatmap_plot_writes_files(plot_module, tmp_path: Path):
+    png_path, pdf_path = plot_module.plot_error_heatmap(
+        _sample_gradient_df(),
+        tmp_path,
+    )
+
+    assert png_path.name == "fig02_gradient_error_heatmap.png"
+    assert pdf_path.name == "fig02_gradient_error_heatmap.pdf"
+    assert png_path.exists()
+    assert pdf_path.exists()
+    assert png_path.stat().st_size > 0
+    assert pdf_path.stat().st_size > 0
+
+
+def test_gradient_magnitude_vs_error_plot_writes_files(plot_module, tmp_path: Path):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+    outputs = plot_module.plot_gradient_magnitude_vs_relative_error_heatmaps(
+        summary,
+        tmp_path,
+    )
+
+    output_names = {path.name for path in outputs}
+    assert {
+        "fig06_gradient_magnitude_vs_relative_error_heatmaps.png",
+        "fig06_gradient_magnitude_vs_relative_error_heatmaps.pdf",
+    } <= output_names
+    for path in outputs:
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+
+def test_gradient_magnitude_vs_error_summary_export_writes_files(
+    plot_module,
+    tmp_path: Path,
+):
+    summary = plot_module.build_gradient_magnitude_error_comparison_table(
+        _full_sample_gradient_df(plot_module)
+    )
+    outputs = plot_module.write_gradient_magnitude_error_summary(summary, tmp_path)
+
+    assert {path.name for path in outputs} == {
+        "gradient_magnitude_vs_error_summary.csv",
+        "gradient_magnitude_vs_error_summary.json",
+    }
+    for path in outputs:
+        assert path.exists()
+        assert path.stat().st_size > 0
 
 
 def test_save_figure_writes_png_and_pdf(plot_module, tmp_path: Path):
@@ -191,6 +355,10 @@ def test_generate_figures_from_real_artifacts_when_present(plot_module, tmp_path
         "fig04_fd_step_study.pdf",
         "fig05_error_by_scenario.png",
         "fig05_error_by_scenario.pdf",
+        "fig06_gradient_magnitude_vs_relative_error_heatmaps.png",
+        "fig06_gradient_magnitude_vs_relative_error_heatmaps.pdf",
+        "gradient_magnitude_vs_error_summary.csv",
+        "gradient_magnitude_vs_error_summary.json",
         "README.md",
     }
     assert expected <= output_names
@@ -208,3 +376,13 @@ def test_error_by_scenario_plot_writes_files(plot_module, tmp_path: Path):
 
     assert png_path.exists()
     assert pdf_path.exists()
+
+
+def test_figures_readme_mentions_figure_6(plot_module, tmp_path: Path):
+    path = plot_module.write_figures_readme(tmp_path, plot_module.RESULTS_DIR)
+    text = path.read_text(encoding="utf-8")
+
+    assert "Figure 6" in text
+    assert "log10(median |AD gradient|)" in text
+    assert "log10(max relative error)" in text
+    assert "No new power-flow solves" in text

@@ -57,6 +57,19 @@ LABELS = {
     "p_trafo_hv_mw": "Transformer HV P",
 }
 
+COMPARISON_INPUT_LABELS = {
+    "load_scale_mv_bus_2": "Load scale",
+    "sgen_scale_static_generator": "sgen scale",
+    "shunt_q_scale": "Shunt Q scale",
+    "trafo_x_scale": "Trafo X scale",
+}
+COMPARISON_OUTPUT_LABELS = {
+    "vm_mv_bus_2_pu": "|V| MV Bus 2",
+    "p_slack_mw": "Slack P",
+    "total_p_loss_mw": "Total P loss",
+    "p_trafo_hv_mw": "Trafo HV P",
+}
+
 GRADIENT_REQUIRED_COLUMNS = {
     "scenario",
     "input_parameter",
@@ -65,6 +78,18 @@ GRADIENT_REQUIRED_COLUMNS = {
 }
 ERROR_SUMMARY_REQUIRED_COLUMNS = {"scenario"}
 FD_STEP_REQUIRED_COLUMNS = {"fd_step", "ad_grad", "fd_grad"}
+GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS = (
+    "input_parameter",
+    "output_observable",
+    "n",
+    "median_abs_ad_grad",
+    "min_abs_ad_grad",
+    "max_abs_ad_grad",
+    "median_rel_error",
+    "max_rel_error",
+    "log10_median_abs_ad_grad",
+    "log10_max_rel_error",
+)
 
 
 def load_csv(path: Path) -> pd.DataFrame:
@@ -200,6 +225,282 @@ def grouped_relative_errors_by_observable(
     if not groups:
         raise ValueError("No observable groups available for relative-error boxplot.")
     return observables, groups
+
+
+def build_gradient_magnitude_error_comparison_table(
+    gradient_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Aggregate AD-gradient magnitudes and relative errors by input/output pair."""
+
+    obs_col, rel_col, _, ad_col, _ = _gradient_columns(gradient_df)
+    require_columns(
+        gradient_df,
+        {"input_parameter", obs_col, ad_col, rel_col},
+        "gradient_table.csv",
+    )
+
+    work = gradient_df.copy()
+    work[ad_col] = _numeric_series(work, ad_col)
+    work[rel_col] = _numeric_series(work, rel_col).abs()
+    work["abs_ad_grad"] = work[ad_col].abs()
+    work = work.dropna(subset=["input_parameter", obs_col, "abs_ad_grad", rel_col])
+
+    rows: list[dict] = []
+    for input_parameter in INPUT_ORDER:
+        for observable in OBSERVABLE_ORDER:
+            subset = work[
+                (work["input_parameter"] == input_parameter)
+                & (work[obs_col] == observable)
+            ]
+            if subset.empty:
+                continue
+
+            abs_ad = subset["abs_ad_grad"].to_numpy(float)
+            rel_error = subset[rel_col].to_numpy(float)
+            median_abs_ad = float(np.median(abs_ad))
+            max_rel_error = float(np.max(rel_error))
+
+            rows.append(
+                {
+                    "input_parameter": input_parameter,
+                    "output_observable": observable,
+                    "n": int(len(subset)),
+                    "median_abs_ad_grad": median_abs_ad,
+                    "min_abs_ad_grad": float(np.min(abs_ad)),
+                    "max_abs_ad_grad": float(np.max(abs_ad)),
+                    "median_rel_error": float(np.median(rel_error)),
+                    "max_rel_error": max_rel_error,
+                    "log10_median_abs_ad_grad": float(
+                        np.log10(max(median_abs_ad, EPS_LOG))
+                    ),
+                    "log10_max_rel_error": float(
+                        np.log10(max(max_rel_error, EPS_LOG))
+                    ),
+                }
+            )
+
+    return pd.DataFrame(rows, columns=GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS)
+
+
+def write_gradient_magnitude_error_summary(
+    summary_df: pd.DataFrame,
+    output_dir: Path,
+) -> list[Path]:
+    """Write the Fig. 6 summary table as CSV and JSON."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "gradient_magnitude_vs_error_summary.csv"
+    json_path = output_dir / "gradient_magnitude_vs_error_summary.json"
+    summary_df.to_csv(csv_path, index=False)
+    summary_df.to_json(json_path, orient="records", indent=2)
+    return [csv_path, json_path]
+
+
+def build_error_heatmap_figure(
+    gradient_df: pd.DataFrame,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Build Figure 2 without saving, so labels and layout stay testable."""
+
+    observables, inputs, matrix = aggregate_error_heatmap(gradient_df)
+    log_matrix = safe_log10(matrix)
+    x_edges = np.arange(len(inputs) + 1, dtype=float) - 0.5
+    y_edges = np.arange(len(observables) + 1, dtype=float) - 0.5
+
+    fig, ax = plt.subplots(figsize=(7.4, 5.0), constrained_layout=True)
+    mesh = ax.pcolormesh(
+        x_edges,
+        y_edges,
+        log_matrix,
+        shading="flat",
+        edgecolors="white",
+        linewidth=0.7,
+    )
+    cbar = fig.colorbar(mesh, ax=ax, pad=0.025)
+    cbar.set_label("log10(max relative error)")
+
+    ax.set_xticks(np.arange(len(inputs)))
+    ax.set_yticks(np.arange(len(observables)))
+    ax.set_xticklabels(
+        [prettify_label(name) for name in inputs],
+        rotation=30,
+        ha="right",
+        rotation_mode="anchor",
+    )
+    ax.set_yticklabels([prettify_label(name) for name in observables])
+    ax.set_xlabel("Input parameter")
+    ax.set_ylabel("Output observable")
+    ax.set_title(
+        "Experiment 2: max AD-vs-FD relative gradient error",
+        fontsize=11,
+        pad=12,
+    )
+    ax.set_xlim(-0.5, len(inputs) - 0.5)
+    ax.set_ylim(len(observables) - 0.5, -0.5)
+    ax.tick_params(axis="both", which="both", length=0)
+
+    for i in range(len(observables)):
+        for j in range(len(inputs)):
+            val = matrix[i, j]
+            label = f"{val:.1e}" if np.isfinite(val) else "nan"
+            ax.text(
+                j,
+                i,
+                label,
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="black",
+                bbox={
+                    "boxstyle": "round,pad=0.16",
+                    "facecolor": "white",
+                    "edgecolor": "none",
+                    "alpha": 0.72,
+                },
+            )
+
+    return fig, ax
+
+
+def build_gradient_magnitude_vs_relative_error_figure(
+    summary_df: pd.DataFrame,
+) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
+    """Build Figure 6 comparing gradient magnitude and relative error heatmaps."""
+
+    require_columns(
+        summary_df,
+        set(GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS),
+        "gradient_magnitude_vs_error_summary",
+    )
+    left_matrix = _summary_matrix(summary_df, "log10_median_abs_ad_grad")
+    right_matrix = _summary_matrix(summary_df, "log10_max_rel_error")
+    left_values = _summary_matrix(summary_df, "median_abs_ad_grad")
+    right_values = _summary_matrix(summary_df, "max_rel_error")
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(12.0, 5.2),
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+    )
+    fig.suptitle(
+        "Experiment 2: Gradient magnitude versus relative AD-vs-FD error",
+        fontsize=12,
+    )
+
+    _draw_comparison_heatmap(
+        fig=fig,
+        ax=axes[0],
+        matrix=left_matrix,
+        annotation_values=left_values,
+        panel_title="Gradient magnitude",
+        colorbar_label="log10(median |AD gradient|)",
+        cmap="viridis_r",
+    )
+    _draw_comparison_heatmap(
+        fig=fig,
+        ax=axes[1],
+        matrix=right_matrix,
+        annotation_values=right_values,
+        panel_title="Relative gradient error",
+        colorbar_label="log10(max relative error)",
+        cmap="viridis",
+    )
+
+    return fig, (axes[0], axes[1])
+
+
+def plot_gradient_magnitude_vs_relative_error_heatmaps(
+    summary_df: pd.DataFrame,
+    output_dir: Path,
+) -> list[Path]:
+    """Figure 6: side-by-side gradient magnitude and relative-error heatmaps."""
+
+    fig, _ = build_gradient_magnitude_vs_relative_error_figure(summary_df)
+    return list(
+        save_figure(
+            fig,
+            output_dir,
+            "fig06_gradient_magnitude_vs_relative_error_heatmaps",
+        )
+    )
+
+
+def _summary_matrix(summary_df: pd.DataFrame, value_column: str) -> np.ndarray:
+    pivot = summary_df.pivot(
+        index="output_observable",
+        columns="input_parameter",
+        values=value_column,
+    )
+    missing_outputs = [name for name in OBSERVABLE_ORDER if name not in pivot.index]
+    missing_inputs = [name for name in INPUT_ORDER if name not in pivot.columns]
+    if missing_outputs or missing_inputs:
+        raise ValueError(
+            "Missing input/output combinations for Fig. 6 heatmap: "
+            f"outputs={missing_outputs}, inputs={missing_inputs}"
+        )
+    return pivot.loc[OBSERVABLE_ORDER, INPUT_ORDER].to_numpy(float)
+
+
+def _draw_comparison_heatmap(
+    fig: plt.Figure,
+    ax: plt.Axes,
+    matrix: np.ndarray,
+    annotation_values: np.ndarray,
+    panel_title: str,
+    colorbar_label: str,
+    cmap: str,
+) -> None:
+    x_edges = np.arange(len(INPUT_ORDER) + 1, dtype=float) - 0.5
+    y_edges = np.arange(len(OBSERVABLE_ORDER) + 1, dtype=float) - 0.5
+    mesh = ax.pcolormesh(
+        x_edges,
+        y_edges,
+        matrix,
+        shading="flat",
+        edgecolors="white",
+        linewidth=0.7,
+        cmap=cmap,
+    )
+    cbar = fig.colorbar(mesh, ax=ax, pad=0.025)
+    cbar.set_label(colorbar_label)
+
+    ax.set_title(panel_title, fontsize=10, pad=10)
+    ax.set_xticks(np.arange(len(INPUT_ORDER)))
+    ax.set_yticks(np.arange(len(OBSERVABLE_ORDER)))
+    ax.set_xticklabels(
+        [COMPARISON_INPUT_LABELS[name] for name in INPUT_ORDER],
+        rotation=30,
+        ha="right",
+        rotation_mode="anchor",
+    )
+    ax.set_yticklabels([COMPARISON_OUTPUT_LABELS[name] for name in OBSERVABLE_ORDER])
+    ax.set_xlabel("Input parameter")
+    ax.set_ylabel("Output observable")
+    ax.set_xlim(-0.5, len(INPUT_ORDER) - 0.5)
+    ax.set_ylim(len(OBSERVABLE_ORDER) - 0.5, -0.5)
+    ax.tick_params(axis="both", which="both", length=0)
+
+    for i in range(len(OBSERVABLE_ORDER)):
+        for j in range(len(INPUT_ORDER)):
+            value = annotation_values[i, j]
+            label = f"{value:.1e}" if np.isfinite(value) else "nan"
+            ax.text(
+                j,
+                i,
+                label,
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="black",
+                bbox={
+                    "boxstyle": "round,pad=0.16",
+                    "facecolor": "white",
+                    "edgecolor": "none",
+                    "alpha": 0.72,
+                },
+            )
 
 
 def _parity_limit(fd_values: np.ndarray, ad_values: np.ndarray) -> tuple[float, float]:
@@ -414,28 +715,7 @@ def plot_error_heatmap(
 ) -> tuple[Path, Path]:
     """Figure 2: heatmap of max relative error over scenarios."""
 
-    observables, inputs, matrix = aggregate_error_heatmap(gradient_df)
-    log_matrix = safe_log10(matrix)
-
-    fig, ax = plt.subplots(figsize=(7.2, 4.8))
-    image = ax.imshow(log_matrix, aspect="auto")
-    cbar = fig.colorbar(image, ax=ax)
-    cbar.set_label("log10(relative error)")
-
-    ax.set_xticks(np.arange(len(inputs)))
-    ax.set_yticks(np.arange(len(observables)))
-    ax.set_xticklabels([prettify_label(name) for name in inputs], rotation=30, ha="right")
-    ax.set_yticklabels([prettify_label(name) for name in observables])
-    ax.set_xlabel("Input parameter")
-    ax.set_ylabel("Output observable")
-
-    for i in range(len(observables)):
-        for j in range(len(inputs)):
-            val = matrix[i, j]
-            label = f"{val:.1e}" if np.isfinite(val) else "nan"
-            ax.text(j, i, label, ha="center", va="center", fontsize=8)
-
-    fig.tight_layout()
+    fig, _ = build_error_heatmap_figure(gradient_df)
     return save_figure(fig, output_dir, "fig02_gradient_error_heatmap")
 
 
@@ -606,7 +886,9 @@ Files: `fig02_gradient_error_heatmap.png` and
 `fig02_gradient_error_heatmap.pdf`. Data source: `gradient_table.csv`.
 The color value is `log10(max(relative error, {EPS_LOG:g}))`; annotations show
 the aggregated max relative error over the three scenarios for each
-input-output combination.
+input-output combination. The cells are rendered as a discrete tiled heatmap
+with visible white boundaries for readability, using only the existing
+exported gradient artifact. No new gradients or power-flow solves are run.
 
 ## Figure 3
 
@@ -626,6 +908,24 @@ exported finite-difference step sizes.
 Files: `fig05_error_by_scenario.png` and `fig05_error_by_scenario.pdf`.
 Data source: `error_summary.csv`. Bars summarize max relative error by
 scenario; median relative error is included when present in the artifact.
+
+## Figure 6
+
+Files: `fig06_gradient_magnitude_vs_relative_error_heatmaps.png` and
+`fig06_gradient_magnitude_vs_relative_error_heatmaps.pdf`. Data source:
+`gradient_table.csv`. The left heatmap shows
+`log10(median |AD gradient|)` over the three scenarios for each
+input-output combination. The right heatmap shows
+`log10(max relative error)` over the same combinations and scenario set.
+The companion files `gradient_magnitude_vs_error_summary.csv` and
+`gradient_magnitude_vs_error_summary.json` contain the aggregated values.
+
+The purpose of Figure 6 is to compare gradient orders of magnitude with
+relative AD-vs-FD errors. Small gradients can amplify relative
+finite-difference deviations because the observable changes measured by
+finite differences become very small. This is a descriptive interpretation of
+existing artifacts only. No new power-flow solves, AD gradients, or finite
+differences are run.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
@@ -640,6 +940,7 @@ def generate_figures(
 
     target_dir = figures_dir if figures_dir is not None else results_dir / "figures"
     gradient_df, error_summary_df, fd_step_df = load_artifacts(results_dir)
+    comparison_summary = build_gradient_magnitude_error_comparison_table(gradient_df)
 
     outputs: list[Path] = []
     outputs.extend(plot_parity(gradient_df, target_dir))
@@ -648,6 +949,13 @@ def generate_figures(
     outputs.extend(plot_error_boxplot(gradient_df, target_dir))
     outputs.extend(plot_fd_step_study(fd_step_df, target_dir))
     outputs.extend(plot_error_by_scenario(error_summary_df, target_dir))
+    outputs.extend(write_gradient_magnitude_error_summary(comparison_summary, target_dir))
+    outputs.extend(
+        plot_gradient_magnitude_vs_relative_error_heatmaps(
+            comparison_summary,
+            target_dir,
+        )
+    )
     outputs.append(write_figures_readme(target_dir, results_dir))
     return outputs
 
