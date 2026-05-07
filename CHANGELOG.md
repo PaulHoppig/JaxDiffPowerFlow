@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-05-07 - Experiment 1 Visualisierungen aus bestehenden Artefakten
+
+### Neue Dateien
+- `experiments/plot_exp01_validation_figures.py` - direkt ausfuehrbare
+  Plot-Pipeline fuer scope-matched Validierungsfehler aus
+  `validation_summary.csv`; erzeugt Long-Table, Stabilitaetszusammenfassung,
+  Szenario-Plot und Boxplot-Darstellung ohne neue Power-Flow-Solves.
+- `tests/test_exp01_plot_outputs.py` - leichte Tests fuer Importierbarkeit,
+  scope-matched-Filter, Tidy-Long-Table, Einheitentransformation,
+  Stabilitaetsstatistik, robuste CV-Berechnung, Plot-Export sowie
+  README-/CSV-/JSON-Export.
+
+### Erzeugte Artefakte
+- `experiments/results/exp01_example_simple_validation/figures/fig01_scope_matched_error_by_scenario.png/pdf`
+- `experiments/results/exp01_example_simple_validation/figures/fig02_scope_matched_error_boxplots.png/pdf`
+- `experiments/results/exp01_example_simple_validation/figures/scope_matched_error_long_table.csv/json`
+- `experiments/results/exp01_example_simple_validation/figures/scope_matched_error_stability_summary.csv/json`
+- `experiments/results/exp01_example_simple_validation/figures/README.md`
+
+### Tests
+- Ausgefuehrt: `python experiments/plot_exp01_validation_figures.py`
+- Ausgefuehrt: `python -m pytest tests/test_exp01_plot_outputs.py`
+  (9 passed)
+- Ausgefuehrt: `python -m pytest tests/test_exp01_example_simple_outputs.py`
+  (34 passed)
+- Zusaetzlicher Plot-Testlauf:
+  `python -m pytest tests/test_exp02_plot_outputs.py tests/test_exp03_plot_outputs.py`
+  (18 passed, 1 bestehender Exp.-3-Fehler wegen fehlendem
+  `padded_limits` in `experiments.plot_exp03_figures`)
+
+### Grenzen
+- Reine deskriptive Auswertung vorhandener Exp.-1-Artefakte.
+- Keine neuen pandapower- oder Power-Flow-Laeufe, keine neue
+  Validierungslogik, keine Gradientenberechnung und keine Aenderung am
+  numerischen JAX-Kern.
+- Die Figuren stuetzen die Interpretation eines systematischen
+  modellstrukturellen Offsets, sind aber kein statistischer Beweis.
+
 ## 2026-05-05 - Experiment 4: Modulare Upstream-Kopplung mit NN-PQ-Surrogat
 
 ### Neue Dateien

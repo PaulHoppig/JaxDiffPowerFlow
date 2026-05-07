@@ -1,0 +1,144 @@
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
+
+def create_schematic_plot():
+    # Setup der Figur für Publikationsqualität (hohe DPI, weißer Hintergrund)
+    fig, ax = plt.subplots(figsize=(14, 7), dpi=300)
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+    # --- DEFINITION DER KOORDINATEN (Schematisch) ---
+    coords = {
+        "ext_grid": (0, 0),
+        "bus1": (1.5, 0),
+        "bus2_3": (4.5, 0),
+        "bus4_5": (7.5, 0),
+        "bus6": (11.5, 2.0),
+        "bus7": (11.5, -2.0)
+    }
+
+    # Hilfsfunktionen für Symbole
+    def draw_bus(x, y, length=1.8, vertical=True, label="", label_pos='bottom'):
+        if vertical:
+            ax.plot([x, x], [y - length/2, y + length/2], color='black', lw=5, solid_capstyle='butt', zorder=5)
+            if label_pos == 'bottom':
+                ax.text(x, y - length/2 - 0.5, label, ha='center', va='top', fontsize=11, fontweight='bold')
+            else:
+                ax.text(x, y + length/2 + 0.2, label, ha='center', va='bottom', fontsize=11, fontweight='bold')
+        else:
+            ax.plot([x - length/2, x + length/2], [y, y], color='black', lw=5, solid_capstyle='butt', zorder=5)
+            ax.text(x, y - 0.6, label, ha='center', va='top', fontsize=11, fontweight='bold')
+
+    def draw_transformer(x1, x2, y):
+        r = 0.35
+        mid_x = (x1 + x2) / 2
+        c1 = patches.Circle((mid_x - 0.25, y), r, edgecolor='black', facecolor='white', lw=1.5, zorder=6)
+        c2 = patches.Circle((mid_x + 0.25, y), r, edgecolor='black', facecolor='none', lw=1.5, zorder=7)
+        ax.add_patch(c1)
+        ax.add_patch(c2)
+        ax.text(mid_x, y + 0.8, "Transformer", ha='center', fontsize=10, fontweight='bold')
+        ax.text(mid_x, y + 0.5, "110kV/20kV", ha='center', fontsize=9, style='italic')
+        # Verbindungen zum Trafo (mit Lücke für die Kreise)
+        ax.plot([x1, mid_x - 0.6], [y, y], color='black', lw=2)
+        ax.plot([mid_x + 0.6, x2], [y, y], color='black', lw=2)
+
+    def draw_ext_grid(x, y):
+        size = 0.6
+        rect = patches.Rectangle((x - size, y - size/2), size, size, edgecolor='black', facecolor='white', hatch='xxxx', lw=1.5, zorder=10)
+        ax.add_patch(rect)
+        ax.plot([x, x + 0.9], [y, y], color='black', lw=2)
+        ax.text(x - size/2, y + 0.7, "External Grid\n110 kV", ha='center', fontsize=10)
+
+    def draw_load(x, y, label="Load"):
+        # Pfeil schräg nach unten
+        ax.arrow(x, y, 0.5, -0.5, head_width=0.2, head_length=0.25, fc='black', ec='black', zorder=10)
+        ax.text(x + 0.7, y - 0.6, label, va='center', fontsize=10)
+
+    def draw_generator(x, y, is_static=False):
+        r = 0.4
+        offset_x = 0.3
+        circle_center = (x + r + offset_x, y)
+        
+        ax.plot([x, x + offset_x], [y, y], color='black', lw=2)
+        
+        if is_static:
+            # Statischer Generator (Quadrat)
+            rect = patches.Rectangle((x + offset_x, y - r), r*2, r*2, edgecolor='black', facecolor='white', lw=1.5, zorder=10)
+            ax.add_patch(rect)
+            # Diagonale Linie im Quadrat
+            ax.plot([x + offset_x, x + offset_x + r*2], [y - r, y + r], color='black', lw=1)
+            ax.text(x + offset_x + r*2 + 0.2, y, "Static Generator", va='center', fontsize=10)
+        else:
+            # Rotierender Generator (Kreis mit G)
+            circle = patches.Circle(circle_center, r, edgecolor='black', facecolor='white', lw=1.5, zorder=10)
+            ax.add_patch(circle)
+            ax.text(circle_center[0], circle_center[1], "G", ha='center', va='center', fontsize=13, fontweight='bold')
+            ax.text(circle_center[0] + r + 0.2, y, "Generator", va='center', fontsize=10)
+
+    def draw_shunt(x, y):
+        # Shunt mit längerem Verbindungsstück nach unten, um Überlappung mit Bus/Linie zu vermeiden
+        conn_y = y - 0.2 # Start unterhalb der Schiene
+        ax.plot([x, x], [y, conn_y - 0.4], color='black', lw=1.5)
+        
+        # Kondensatorplatten
+        ax.plot([x - 0.35, x + 0.35], [conn_y - 0.4, conn_y - 0.4], color='black', lw=2)
+        ax.plot([x - 0.35, x + 0.35], [conn_y - 0.55, conn_y - 0.55], color='black', lw=2)
+        
+        # Erdung
+        ax.plot([x, x], [conn_y - 0.55, conn_y - 0.8], color='black', lw=1.5)
+        ax.plot([x - 0.2, x + 0.2], [conn_y - 0.8, conn_y - 0.8], color='black', lw=1.5)
+        ax.plot([x - 0.1, x + 0.1], [conn_y - 0.9, conn_y - 0.9], color='black', lw=1)
+        
+        ax.text(x, conn_y - 1.2, "Shunt", ha='center', fontsize=10)
+
+    # --- ZEICHNEN DES NETZES ---
+
+    # 1. Busse zeichnen
+    draw_bus(coords["bus1"][0], coords["bus1"][1], label="Bus 1")
+    draw_bus(coords["bus2_3"][0], coords["bus2_3"][1], label="Bus 2 / Bus 3")
+    draw_bus(coords["bus4_5"][0], coords["bus4_5"][1], length=4.0, label="Bus 4 / Bus 5")
+    draw_bus(coords["bus6"][0], coords["bus6"][1], label="Bus 6", label_pos='top')
+    draw_bus(coords["bus7"][0], coords["bus7"][1], label="Bus 7", label_pos='bottom')
+
+    # 2. Verbindungen & Komponenten
+    draw_ext_grid(coords["ext_grid"][0], coords["ext_grid"][1])
+
+    # Line 1
+    ax.plot([coords["bus1"][0], coords["bus2_3"][0]], [0, 0], color='black', lw=2.5, zorder=1)
+    ax.text((coords["bus1"][0] + coords["bus2_3"][0])/2, 0.3, "Line 1", ha='center', fontsize=10, fontweight='bold')
+    ax.text((coords["bus1"][0] + coords["bus2_3"][0])/2, -0.4, "10.0 km", ha='center', fontsize=9)
+
+    # Shunt an Bus 2/3 (nach unten versetzt)
+    draw_shunt(coords["bus2_3"][0], -0.1)
+
+    # Transformer
+    draw_transformer(coords["bus2_3"][0], coords["bus4_5"][0], 0)
+
+    # Line 2 (Oben)
+    ax.plot([coords["bus4_5"][0], coords["bus6"][0]], [2.0, 2.0], color='black', lw=2.5)
+    ax.text((coords["bus4_5"][0] + coords["bus6"][0])/2, 2.3, "Line 2", ha='center', fontsize=10, fontweight='bold')
+    ax.text((coords["bus4_5"][0] + coords["bus6"][0])/2, 1.6, "2.0 km", ha='center', fontsize=9)
+    draw_generator(coords["bus6"][0], coords["bus6"][1])
+
+    # Line 3 (Inaktiv / Gestrichelt)
+    ax.plot([coords["bus6"][0], coords["bus7"][0]], [1.5, -1.5], color='darkgrey', lw=1.2, ls='--', zorder=0)
+    ax.text(coords["bus6"][0] - 0.4, 0, "Line 3 (open)", color='grey', fontsize=9, rotation=90, va='center')
+
+    # Line 4 (Unten)
+    ax.plot([coords["bus4_5"][0], coords["bus7"][0]], [-2.0, -2.0], color='black', lw=2.5)
+    ax.text((coords["bus4_5"][0] + coords["bus7"][0])/2, -1.7, "Line 4", ha='center', fontsize=10, fontweight='bold')
+    ax.text((coords["bus4_5"][0] + coords["bus7"][0])/2, -2.4, "2.5 km", ha='center', fontsize=9)
+    
+    # Komponenten an Bus 7
+    draw_generator(coords["bus7"][0], coords["bus7"][1] + 0.4, is_static=True)
+    draw_load(coords["bus7"][0], coords["bus7"][1] - 0.4)
+
+    # Speichern der Dateien
+    plt.tight_layout()
+    plt.savefig("example_simple_simplified_grid.png", bbox_inches='tight')
+    plt.savefig("example_simple_simplified_grid.pdf", bbox_inches='tight')
+    plt.show()
+
+if __name__ == "__main__":
+    create_schematic_plot()

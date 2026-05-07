@@ -32,7 +32,7 @@ SWEEP_T_AMB_TICKS = (5, 15, 25, 35, 45, 55)
 GRID_G_POA_TICKS = (200, 400, 600, 800, 1000)
 GRID_T_AMB_TICKS = (5, 15, 25, 35, 45)
 SLACK_SIGN_NOTE = "negative = export to upstream grid"
-SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $v_{wind} = 2$ m/s"
+SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $_v{wind} = 2 m/s$"
 
 SCENARIO_GRID_REQUIRED_COLUMNS = {
     "network_scenario",
@@ -201,23 +201,6 @@ def sensitivity_values_kw_per_c(rows: list[dict]) -> list[float]:
     return [1000.0 * _as_float(row, "value") for row in rows]
 
 
-def padded_limits(values: list[float], pad_fraction: float = 0.25) -> tuple[float, float]:
-    """Return finite display limits with padding around the data range."""
-
-    arr = np.asarray(values, dtype=float)
-    finite = arr[np.isfinite(arr)]
-    if finite.size == 0:
-        return -1.0, 1.0
-
-    lower = float(np.min(finite))
-    upper = float(np.max(finite))
-    if lower == upper:
-        pad = max(abs(lower) * 0.05, 1e-6)
-    else:
-        pad = pad_fraction * (upper - lower)
-    return lower - pad, upper + pad
-
-
 def pivot_grid_2d_base_p_slack(
     scenario_rows: list[dict],
 ) -> tuple[list[float], list[float], np.ndarray]:
@@ -306,7 +289,7 @@ def plot_fig02_heatmap_g_t_p_slack_base(
     g_edges = _coordinate_edges(g_values)
     t_edges = _coordinate_edges(t_values)
 
-    fig, ax = plt.subplots(figsize=(6.6, 4.8), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(6.6, 4.8))
     mesh = ax.pcolormesh(
         g_edges,
         t_edges,
@@ -323,6 +306,15 @@ def plot_fig02_heatmap_g_t_p_slack_base(
     ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
     ax.set_title("Base scenario: Slack active power over weather grid", fontsize=10)
     ax.text(
+        0.99,
+        1.02,
+        r"discrete 5$\times$5 weather grid",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+    )
+    ax.text(
         0.01,
         -0.20,
         SLACK_SIGN_NOTE,
@@ -331,6 +323,7 @@ def plot_fig02_heatmap_g_t_p_slack_base(
         va="top",
         fontsize=8,
     )
+    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
     return _plot_export(fig, "fig02_heatmap_g_t_p_slack_base", figures_dir)
 
 
@@ -357,15 +350,19 @@ def plot_fig03_sensitivity_p_slack_vs_t_amb(
             label=_scenario_label(scenario),
         )
 
-    ax.set_ylim(*padded_limits(all_y, pad_fraction=0.30))
+    y_values = np.asarray(all_y, dtype=float)
+    if y_values.size and np.all(y_values >= 0.0):
+        ax.set_ylim(0.0, float(np.nanmax(y_values)) * 1.15)
+    elif y_values.size:
+        span = float(np.nanmax(y_values) - np.nanmin(y_values))
+        pad = max(span * 0.5, float(np.nanmax(np.abs(y_values))) * 0.1, 1e-9)
+        ax.set_ylim(float(np.nanmin(y_values)) - pad, float(np.nanmax(y_values)) + pad)
 
     ax.set_xticks(SWEEP_T_AMB_TICKS)
     ax.set_xlabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
-    ax.set_ylabel(
-        r"Local sensitivity $\partial P_{slack} / \partial T_{amb}$ [kW/$^\circ$C]"
-    )
+    ax.set_ylabel(r"$\partial P_{slack} / \partial T_{amb}$ [kW/$^\circ$C]")
     ax.set_title(
-        r"Local AD sensitivity at $G_{poa} = 800$ W/m$^2$, $v_{wind} = 2$ m/s",
+        r"Local AD sensitivity at $G_{poa} = 800$ W/m$^2$, wind = 2 m/s",
         fontsize=10,
     )
     ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
@@ -409,9 +406,9 @@ Files: `fig03_sensitivity_p_slack_vs_t_amb.png` and
 `fig03_sensitivity_p_slack_vs_t_amb.pdf`. Data source:
 `sensitivity_table.csv`. Filter: `weather_case_type == "sweep_1d"`,
 `observable == "p_slack_mw"`, and `input_parameter == "t_amb_c"`.
-Lines compare `base`, `load_low`, and `load_high` over `t_amb_c`. The raw
-artifact stores sensitivities in MW/degC; the figure converts them to kW/degC
-by multiplying `value` by 1000.
+Lines compare `base`, `load_low`, and `load_high`. The raw artifact stores
+sensitivities in MW/degC; the figure converts them to kW/degC by multiplying
+`value` by 1000.
 
 ## Sign convention
 

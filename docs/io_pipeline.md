@@ -29,6 +29,7 @@ Die aktuelle Netzimport-Pipeline unterstützt stationäre AC-Netze mit folgendem
 | Leitungsschalter | Einfache Aktivierung oder Deaktivierung von Leitungen innerhalb des unterstützten Switch-Modells |
 
 ---
+<div style="page-break-after: always;"></div>
 
 ## 2. Anforderungen an verarbeitbare Netze
 
@@ -56,6 +57,7 @@ Ein Netz sollte die folgenden Eigenschaften erfüllen, damit es mit der aktuelle
 - Die Eingabedaten enthalten keine aktiven Elemente, die eine nicht unterstützte Controllerlogik oder diskrete Betriebszustandswechsel erfordern.
 
 ---
+<div style="page-break-after: always;"></div>
 
 ## 3. Nicht unterstützter Modellumfang
 
@@ -77,6 +79,7 @@ Die folgenden Modellbestandteile sind im aktuellen Entwicklungsstand nicht Teil 
 | Großskalige industrielle Netzberechnung | Nicht Ziel des aktuellen Proof-of-Concept-Umfangs |
 
 ---
+<div style="page-break-after: always;"></div>
 
 ## 4. Kurzfazit
 
