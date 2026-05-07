@@ -17,6 +17,7 @@ Electrical operating points: base, load_low, load_high.
 Weather design:
   A) 2D grid: g_poa_wm2 x t_amb_c at fixed wind (5x5 = 25 cases).
   B) 1D sweep: t_amb_c at fixed G and wind (6 cases).
+  C) 1D sweep: g_poa_wm2 at fixed T_amb and wind (5 cases).
 
 alpha and kappa are fixed constants in Exp. 3 (not varied).
 
@@ -92,6 +93,10 @@ WIND_REF_MS: float = 2.0
 # B) 1D temperature sweep at fixed G and wind
 G_REF_WM2: float = 800.0
 T_SWEEP_C: tuple[float, ...] = (5.0, 15.0, 25.0, 35.0, 45.0, 55.0)
+
+# C) 1D irradiance sweep at fixed T_amb and wind
+G_SWEEP_WM2: tuple[float, ...] = G_LEVELS_WM2
+T_REF_C: float = 25.0
 
 # FD step sizes for spot-check validation
 FD_STEPS: dict[str, float] = {
@@ -252,7 +257,22 @@ def _weather_cases_1d_sweep() -> list[dict]:
     ]
 
 
-ALL_WEATHER_CASES: list[dict] = _weather_cases_2d() + _weather_cases_1d_sweep()
+def _weather_cases_g_1d_sweep() -> list[dict]:
+    return [
+        {
+            "weather_case_id": f"sweepg1d_g{int(g)}_t{int(T_REF_C)}_w{WIND_REF_MS:.0f}",
+            "weather_case_type": "sweep_g_1d",
+            "g_poa_wm2": g,
+            "t_amb_c": T_REF_C,
+            "wind_ms": WIND_REF_MS,
+        }
+        for g in G_SWEEP_WM2
+    ]
+
+
+ALL_WEATHER_CASES: list[dict] = (
+    _weather_cases_2d() + _weather_cases_1d_sweep() + _weather_cases_g_1d_sweep()
+)
 
 
 # ---------------------------------------------------------------------------
@@ -758,7 +778,20 @@ def write_metadata(results_dir: Path) -> None:
                 "wind_ref_ms": WIND_REF_MS,
                 "n_cases": len(T_SWEEP_C),
             },
+            "sweep_g_1d": {
+                "g_sweep_wm2": list(G_SWEEP_WM2),
+                "t_ref_c": T_REF_C,
+                "wind_ref_ms": WIND_REF_MS,
+                "n_cases": len(G_SWEEP_WM2),
+            },
             "total_weather_cases_per_scenario": len(ALL_WEATHER_CASES),
+            "total_forward_solves": len(ELECTRICAL_SCENARIOS) * len(ALL_WEATHER_CASES),
+            "total_sensitivity_rows": (
+                len(ELECTRICAL_SCENARIOS)
+                * len(ALL_WEATHER_CASES)
+                * len(OBSERVABLE_SPECS)
+                * len(WEATHER_INPUT_SPECS)
+            ),
         },
         "observables": [
             {"name": name, "unit": unit} for name, unit in OBSERVABLE_SPECS
@@ -788,7 +821,7 @@ def write_metadata(results_dir: Path) -> None:
             "PV plant modelled as weather-dependent PQ injection, not a voltage-regulating PV bus.",
             "No Q limits, no PV-to-PQ switching, no controller logic.",
             "Weather inputs remain in meteorological units; conversion to p.u. only for P_pv, Q_pv.",
-            "Compact scenario space: 3 electrical x 31 weather = 93 forward solves.",
+            "Compact scenario space: 3 electrical x 36 weather = 108 forward solves.",
             "gen is converted to sgen(P, Q=0) (scope_matched, consistent with Exp. 1/2).",
             "alpha and kappa are fixed constants in Exp. 3 (EXP3_ALPHA=1.0, EXP3_KAPPA=-0.25).",
             "wind_adj = wind_ms in NOCT-SAM model (no height or mounting correction).",
@@ -811,7 +844,13 @@ weather-driven PV model (`pv_pq_injection_from_weather`).
 - **2D grid** (`grid_2d`): 5 irradiance levels x 5 temperature levels at fixed
   wind (2 m/s) → 25 weather cases per electrical scenario.
 - **1D sweep** (`sweep_1d`): 6 temperature levels at fixed G=800 W/m², wind=2 m/s.
-- Total: 31 weather cases × 3 electrical scenarios = 93 forward solves.
+- **1D irradiance sweep** (`sweep_g_1d`): 5 irradiance levels at fixed
+  T_amb=25 degC, wind=2 m/s.
+- Total: 36 weather cases x 3 electrical scenarios = 108 forward solves.
+- Sensitivity table: 108 cases x 4 observables x 3 weather inputs = 1296 rows.
+
+The irradiance sweep shows the dominant direct influence of PV irradiance on PV
+active power and therefore on the slack active-power balance.
 
 ## Fixed model constants
 
@@ -878,7 +917,8 @@ def run_experiment() -> tuple[
     print(f"Results directory: {RESULTS_DIR}", flush=True)
     print(f"Weather cases per scenario: {len(ALL_WEATHER_CASES)}", flush=True)
     print(f"  2D grid: {len(G_LEVELS_WM2) * len(T_LEVELS_C)} cases", flush=True)
-    print(f"  1D sweep: {len(T_SWEEP_C)} cases", flush=True)
+    print(f"  1D temperature sweep: {len(T_SWEEP_C)} cases", flush=True)
+    print(f"  1D irradiance sweep: {len(G_SWEEP_WM2)} cases", flush=True)
     print("=" * 72, flush=True)
 
     # Build scenario bases

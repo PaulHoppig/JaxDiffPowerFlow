@@ -31,8 +31,10 @@ SCENARIO_ORDER = ("base", "load_low", "load_high")
 SWEEP_T_AMB_TICKS = (5, 15, 25, 35, 45, 55)
 GRID_G_POA_TICKS = (200, 400, 600, 800, 1000)
 GRID_T_AMB_TICKS = (5, 15, 25, 35, 45)
+G_SWEEP_TICKS = (200, 400, 600, 800, 1000)
 SLACK_SIGN_NOTE = "negative = export to upstream grid"
 SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $_v{wind} = 2 m/s$"
+G_SWEEP_FIXED_WEATHER_LABEL = r"$T_{amb} = 25^\circ$C, wind = 2 m/s"
 
 SCENARIO_GRID_REQUIRED_COLUMNS = {
     "network_scenario",
@@ -195,10 +197,73 @@ def _coordinate_edges(values: list[float]) -> np.ndarray:
     return np.concatenate([[first], mids, [last]])
 
 
+def padded_limits(values: list[float], pad_fraction: float = 0.1) -> tuple[float, float]:
+    """Return y-limits padded around finite values."""
+
+    arr = np.asarray(values, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return -1.0, 1.0
+    lo = float(np.min(finite))
+    hi = float(np.max(finite))
+    if lo == hi:
+        pad = max(abs(lo) * pad_fraction, 1e-9)
+    else:
+        pad = (hi - lo) * pad_fraction
+    return lo - pad, hi + pad
+
+
 def sensitivity_values_kw_per_c(rows: list[dict]) -> list[float]:
     """Return sensitivity values converted from MW/degC to kW/degC."""
 
     return [1000.0 * _as_float(row, "value") for row in rows]
+
+
+def sensitivity_values_kw_per_wm2(rows: list[dict]) -> list[float]:
+    """Return sensitivity values converted from MW/(W/m^2) to kW/(W/m^2)."""
+
+    return [1000.0 * _as_float(row, "value") for row in rows]
+
+
+def select_fig04_rows(scenario_rows: list[dict]) -> dict[str, list[dict]]:
+    """Return sweep_g_1d p_slack_mw rows grouped by electrical scenario."""
+
+    grouped = {
+        scenario: sorted(
+            [
+                row
+                for row in scenario_rows
+                if row["network_scenario"] == scenario
+                and row["weather_case_type"] == "sweep_g_1d"
+                and row["observable"] == "p_slack_mw"
+            ],
+            key=lambda row: _as_float(row, "g_poa_wm2"),
+        )
+        for scenario in SCENARIO_ORDER
+    }
+    _ensure_nonempty_groups(grouped, "fig04 sweep_g_1d p_slack_mw")
+    return grouped
+
+
+def select_fig05_rows(sensitivity_rows: list[dict]) -> dict[str, list[dict]]:
+    """Return sweep_g_1d d(p_slack_mw)/d(g_poa_wm2) rows grouped by scenario."""
+
+    grouped = {
+        scenario: sorted(
+            [
+                row
+                for row in sensitivity_rows
+                if row["network_scenario"] == scenario
+                and row["weather_case_type"] == "sweep_g_1d"
+                and row["observable"] == "p_slack_mw"
+                and row["input_parameter"] == "g_poa_wm2"
+            ],
+            key=lambda row: _as_float(row, "g_poa_wm2"),
+        )
+        for scenario in SCENARIO_ORDER
+    }
+    _ensure_nonempty_groups(grouped, "fig05 sweep_g_1d d_p_slack/d_g_poa")
+    return grouped
 
 
 def pivot_grid_2d_base_p_slack(
@@ -371,6 +436,99 @@ def plot_fig03_sensitivity_p_slack_vs_t_amb(
     return _plot_export(fig, "fig03_sensitivity_p_slack_vs_t_amb", figures_dir)
 
 
+def plot_g_sweep_p_slack(
+    scenario_rows: list[dict],
+    figures_dir: Path = FIGURES_DIR,
+) -> list[Path]:
+    """Figure 4: 1D irradiance sweep of slack active power."""
+
+    grouped = select_fig04_rows(scenario_rows)
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    for scenario in SCENARIO_ORDER:
+        rows = grouped[scenario]
+        x = [_as_float(row, "g_poa_wm2") for row in rows]
+        y = [_as_float(row, "value") for row in rows]
+        ax.plot(
+            x,
+            y,
+            marker="o",
+            markersize=4.2,
+            linewidth=1.6,
+            label=_scenario_label(scenario),
+        )
+
+    ax.set_xticks(G_SWEEP_TICKS)
+    ax.set_xlabel("Plane-of-array irradiance G_poa [W/m^2]")
+    ax.set_ylabel("Slack active power P_slack [MW]")
+    ax.set_title("Slack active power over irradiance sweep", fontsize=10)
+    ax.text(
+        0.99,
+        -0.22,
+        G_SWEEP_FIXED_WEATHER_LABEL,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+    )
+    ax.text(
+        0.01,
+        -0.22,
+        SLACK_SIGN_NOTE,
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8,
+    )
+    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
+    return list(_plot_export(fig, "fig04_g_sweep_p_slack", figures_dir))
+
+
+def plot_g_sweep_p_slack_sensitivity(
+    sensitivity_rows: list[dict],
+    figures_dir: Path = FIGURES_DIR,
+) -> list[Path]:
+    """Figure 5: d(P_slack)/d(G_poa) over the 1D irradiance sweep."""
+
+    grouped = select_fig05_rows(sensitivity_rows)
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    all_y: list[float] = []
+    for scenario in SCENARIO_ORDER:
+        rows = grouped[scenario]
+        x = [_as_float(row, "g_poa_wm2") for row in rows]
+        y = sensitivity_values_kw_per_wm2(rows)
+        all_y.extend(y)
+        ax.plot(
+            x,
+            y,
+            marker="o",
+            markersize=4.2,
+            linewidth=1.6,
+            label=_scenario_label(scenario),
+        )
+
+    ax.set_xticks(G_SWEEP_TICKS)
+    ax.set_xlabel("Plane-of-array irradiance G_poa [W/m^2]")
+    ax.set_ylabel("dP_slack/dG_poa [kW/(W/m^2)]")
+    ax.set_title("Local AD sensitivity over irradiance sweep", fontsize=10)
+    ax.text(
+        0.99,
+        -0.18,
+        G_SWEEP_FIXED_WEATHER_LABEL,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+    )
+    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.grid(True, alpha=0.3)
+    if all_y:
+        ax.set_ylim(*padded_limits(all_y, pad_fraction=0.15))
+    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
+    return list(_plot_export(fig, "fig05_sensitivity_p_slack_vs_g_poa", figures_dir))
+
+
 def write_figures_readme(
     figures_dir: Path = FIGURES_DIR,
     results_dir: Path = RESULTS_DIR,
@@ -414,6 +572,31 @@ sensitivities in MW/degC; the figure converts them to kW/degC by multiplying
 
 For all slack active-power plots, negative `P_slack` values denote export to
 the upstream grid.
+
+## Figure 4
+
+Files: `fig04_g_sweep_p_slack.png` and `fig04_g_sweep_p_slack.pdf`.
+Data source: `scenario_grid.csv`. Filter:
+`weather_case_type == "sweep_g_1d"` and `observable == "p_slack_mw"`.
+Lines compare `base`, `load_low`, and `load_high` over `g_poa_wm2` at fixed
+`t_amb_c = 25` and `wind_ms = 2`. The irradiance sweep shows the dominant
+direct influence of PV irradiance on PV active power and the slack active-power
+balance.
+
+## Figure 5
+
+Files: `fig05_sensitivity_p_slack_vs_g_poa.png` and
+`fig05_sensitivity_p_slack_vs_g_poa.pdf`. Data source:
+`sensitivity_table.csv`. Filter: `weather_case_type == "sweep_g_1d"`,
+`observable == "p_slack_mw"`, and `input_parameter == "g_poa_wm2"`.
+Lines compare the local AD sensitivity of slack active power to irradiance
+over the same sweep. The raw artifact stores sensitivities in MW/(W/m^2); the
+figure converts them to kW/(W/m^2) by multiplying `value` by 1000.
+
+## Limitations
+
+The figures are generated from existing Experiment 3 artifacts. Plotting does
+not change the PV model, the power-flow core, or solver logic.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
@@ -433,6 +616,8 @@ def generate_figures(
     outputs.extend(plot_fig01_t_amb_sweep_p_slack(scenario_rows, target_dir))
     outputs.extend(plot_fig02_heatmap_g_t_p_slack_base(scenario_rows, target_dir))
     outputs.extend(plot_fig03_sensitivity_p_slack_vs_t_amb(sensitivity_rows, target_dir))
+    outputs.extend(plot_g_sweep_p_slack(scenario_rows, target_dir))
+    outputs.extend(plot_g_sweep_p_slack_sensitivity(sensitivity_rows, target_dir))
     outputs.append(write_figures_readme(target_dir, results_dir))
     return outputs
 

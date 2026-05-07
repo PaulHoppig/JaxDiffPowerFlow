@@ -73,9 +73,11 @@ def test_fixed_constants_match_specification(exp_module):
 def test_weather_grid_size(exp_module):
     n_2d = len(exp_module.G_LEVELS_WM2) * len(exp_module.T_LEVELS_C)
     n_1d = len(exp_module.T_SWEEP_C)
+    n_g_1d = len(exp_module.G_SWEEP_WM2)
     assert n_2d == 25
     assert n_1d == 6
-    assert len(exp_module.ALL_WEATHER_CASES) == n_2d + n_1d
+    assert n_g_1d == 5
+    assert len(exp_module.ALL_WEATHER_CASES) == n_2d + n_1d + n_g_1d
 
 
 def test_weather_cases_have_required_keys(exp_module):
@@ -89,7 +91,20 @@ def test_weather_cases_have_required_keys(exp_module):
 
 def test_weather_case_types_are_valid(exp_module):
     types = {c["weather_case_type"] for c in exp_module.ALL_WEATHER_CASES}
-    assert types == {"grid_2d", "sweep_1d"}
+    assert types == {"grid_2d", "sweep_1d", "sweep_g_1d"}
+
+
+def test_irradiance_sweep_weather_cases_match_specification(exp_module):
+    cases = [
+        case
+        for case in exp_module.ALL_WEATHER_CASES
+        if case["weather_case_type"] == "sweep_g_1d"
+    ]
+
+    assert len(cases) == 5
+    assert [case["g_poa_wm2"] for case in cases] == list(exp_module.G_SWEEP_WM2)
+    assert all(case["t_amb_c"] == 25.0 for case in cases)
+    assert all(case["wind_ms"] == 2.0 for case in cases)
 
 
 def test_spotcheck_cases_cover_all_three_weather_inputs(exp_module):
@@ -201,6 +216,27 @@ def _make_stub_grid_row(exp_module):
     )
 
 
+def _make_stub_g_sweep_grid_row(exp_module):
+    return exp_module.ScenarioGridRow(
+        network_scenario="base",
+        load_factor=1.0,
+        weather_case_id="sweepg1d_g800_t25_w2",
+        weather_case_type="sweep_g_1d",
+        g_poa_wm2=800.0,
+        t_amb_c=25.0,
+        wind_ms=2.0,
+        cell_temp_c=40.0,
+        p_pv_mw=1.85,
+        q_pv_mvar=-0.4625,
+        observable="p_slack_mw",
+        value=-1.5,
+        unit="MW",
+        converged=True,
+        iterations=5,
+        residual_norm=1e-11,
+    )
+
+
 def _make_stub_sensitivity_row(exp_module):
     return exp_module.SensitivityRow(
         network_scenario="base",
@@ -215,6 +251,24 @@ def _make_stub_sensitivity_row(exp_module):
         input_parameter="g_poa_wm2",
         input_unit="W/m^2",
         value=1.23e-5,
+        ad_converged=True,
+    )
+
+
+def _make_stub_g_sweep_sensitivity_row(exp_module):
+    return exp_module.SensitivityRow(
+        network_scenario="base",
+        load_factor=1.0,
+        weather_case_id="sweepg1d_g800_t25_w2",
+        weather_case_type="sweep_g_1d",
+        g_poa_wm2=800.0,
+        t_amb_c=25.0,
+        wind_ms=2.0,
+        observable="p_slack_mw",
+        observable_unit="MW",
+        input_parameter="g_poa_wm2",
+        input_unit="W/m^2",
+        value=-0.0015,
         ad_converged=True,
     )
 
@@ -245,8 +299,8 @@ def _make_stub_summary_row(exp_module):
     return exp_module.RunSummaryRow(
         network_scenario="base",
         load_factor=1.0,
-        n_weather_cases=31,
-        n_converged=31,
+        n_weather_cases=36,
+        n_converged=36,
         n_failed=0,
         min_vm_mv_bus_2_pu=0.98,
         max_vm_mv_bus_2_pu=1.01,
@@ -337,6 +391,9 @@ def test_metadata_json_contains_required_keys(exp_module, tmp_path: Path):
     assert meta["model_constants"]["alpha"] == 1.0
     assert meta["model_constants"]["kappa"] == -0.25
     assert "weather_design" in meta
+    assert "sweep_g_1d" in meta["weather_design"]
+    assert meta["weather_design"]["total_forward_solves"] == 108
+    assert meta["weather_design"]["total_sensitivity_rows"] == 1296
     assert "known_simplifications" in meta
     assert "electrical_scenarios" in meta
     assert "observables" in meta
@@ -350,6 +407,8 @@ def test_readme_md_is_written(exp_module, tmp_path: Path):
     assert "scenario_grid" in readme
     assert "sensitivity_table" in readme
     assert "gradient_spotcheck" in readme
+    assert "sweep_g_1d" in readme
+    assert "108 forward solves" in readme
 
 
 def test_scenario_grid_json_is_valid(exp_module, tmp_path: Path):
@@ -376,6 +435,22 @@ def test_sensitivity_json_has_mandatory_observable_and_input(exp_module, tmp_pat
     assert isinstance(data[0]["ad_converged"], bool)
 
 
+def test_stub_scenario_grid_contains_g_sweep_p_slack_row(exp_module):
+    row = _make_stub_g_sweep_grid_row(exp_module)
+
+    assert row.weather_case_type == "sweep_g_1d"
+    assert row.observable == "p_slack_mw"
+    assert row.g_poa_wm2 == 800.0
+
+
+def test_stub_sensitivity_table_contains_g_sweep_p_slack_g_gradient(exp_module):
+    row = _make_stub_g_sweep_sensitivity_row(exp_module)
+
+    assert row.weather_case_type == "sweep_g_1d"
+    assert row.observable == "p_slack_mw"
+    assert row.input_parameter == "g_poa_wm2"
+
+
 # ---------------------------------------------------------------------------
 # Scenario total count sanity
 # ---------------------------------------------------------------------------
@@ -387,7 +462,7 @@ def test_total_scenario_count_is_compact(exp_module):
     n_total = n_electrical * n_weather
     # Must be compact: no more than 200 total forward solves
     assert n_total <= 200, f"Too many scenarios: {n_total}"
-    assert n_total >= 3, "At least one case per operating point"
+    assert n_total == 108
 
 
 def test_expected_sensitivity_row_count_per_case(exp_module):
@@ -395,6 +470,11 @@ def test_expected_sensitivity_row_count_per_case(exp_module):
     n_inputs = len(exp_module.WEATHER_INPUT_SPECS)
     expected_per_case = n_obs * n_inputs
     assert expected_per_case == 12  # 4 obs x 3 inputs
+    assert (
+        len(exp_module.ELECTRICAL_SCENARIOS)
+        * len(exp_module.ALL_WEATHER_CASES)
+        * expected_per_case
+    ) == 1296
 
 
 def test_spotcheck_has_at_least_three_cases(exp_module):

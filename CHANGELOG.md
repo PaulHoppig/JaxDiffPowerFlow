@@ -1,5 +1,55 @@
 # Changelog
 
+## 2026-05-07 - Experiment 3 Einstrahlungs-Sweep ergaenzt
+
+### Geaenderte Dateien
+- `experiments/exp03_cross_domain_pv_weather.py` - neues Wetterdesign
+  `sweep_g_1d` ergaenzt: `g_poa_wm2 = {200, 400, 600, 800, 1000}` bei
+  `t_amb_c = 25.0` und `wind_ms = 2.0`.
+- `experiments/plot_exp03_figures.py` - neue Fig. 4 fuer den
+  Einstrahlungs-Sweep der Slack-Wirkleistung und neue Fig. 5 fuer die lokale
+  AD-Sensitivitaet `dP_slack/dG_poa` ergaenzt.
+- `tests/test_exp03_cross_domain_outputs.py` - Wetterfalltyp,
+  Szenariozaehler, Metadaten und neue Sweep-Schemafaelle abgesichert.
+- `tests/test_exp03_plot_outputs.py` - Filter, Einheitenumrechnung,
+  Plot-Export und Achsenlabels fuer den Einstrahlungs-Sweep abgesichert.
+- `experiments/results/exp03_cross_domain_pv_weather/README.md` und
+  `metadata.json` - neues Wetterdesign und Artefaktgroessen dokumentiert.
+- `experiments/results/exp03_cross_domain_pv_weather/figures/README.md` -
+  Fig. 4 und Fig. 5 dokumentiert.
+
+### Neue Wetterfallart
+- `sweep_g_1d`: 5 Einstrahlungswerte bei fester Umgebungstemperatur und festem
+  Wind.
+- Forward-Solves: 108
+- Sensitivitaetszeilen: 1296
+
+### Neue Artefakte
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig04_g_sweep_p_slack.png/pdf`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig05_sensitivity_p_slack_vs_g_poa.png/pdf`
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp03_cross_domain_pv_weather.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp03_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_cross_domain_outputs.py`
+  (27 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_plot_outputs.py`
+  (15 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pv_model.py`
+  (16 passed)
+
+### Grenzen
+- Keine Aenderung am PV-Modell, am Power-Flow-Kern, Solver, Residuen, Y-Bus,
+  Compiler oder pandapower-Adapter.
+- Keine neue vollstaendige FD-Validierung; die bestehenden Spotchecks bleiben
+  kompakt.
+- `alpha` und `kappa` bleiben feste Konstanten.
+
 ## 2026-05-07 - Experiment 2 Gradientengroessen-vs-Fehler-Heatmaps
 
 ### Geaenderte Dateien
