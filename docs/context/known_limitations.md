@@ -108,6 +108,27 @@ Die Gradientenvalidierung zeigt numerische Konsistenz gegenüber Finite Differen
 - sehr große Netze,
 - stark nichtlineare oder nichtglatte Upstream-Modelle.
 
+## Grenzen von Experiment 5a/5b
+
+Experiment 5a ist Screening und Fallauswahl, keine Optimierung. Der zusaetzliche
+30-C-Auswahlfall ist ein separates Add-on und veraendert den 48-Fall-
+Screeningumfang nicht.
+
+Experiment 5b optimiert nur diesen einen ausgewaehlten Betriebspunkt. Der
+Exportzielwert von `7.0 MW` ist ein demonstratorinterner Zielwert fuer die
+Bachelorarbeits-Story, keine normative Netzcode-Grenze. Die Optimierung nutzt
+einen glatten Export-Proxy `-p_slack_mw`; berichtet wird weiterhin
+`p_export_mw = max(0, -p_slack_mw)`.
+
+Nicht enthalten sind weiterhin:
+
+- PV-Bus-Spannungsregelung,
+- Q-Limits,
+- PV-PQ-Umschaltung,
+- Controllerlogik,
+- Optimierung ueber mehrere Wetter- oder Lastszenarien,
+- normative thermische Betriebsmittelbewertung.
+
 ## Nicht-Ziele der Bachelorarbeit
 
 Nicht Ziel der aktuellen Arbeit sind:

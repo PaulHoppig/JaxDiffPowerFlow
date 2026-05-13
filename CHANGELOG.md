@@ -1,5 +1,84 @@
 # Changelog
 
+## 2026-05-13 - Experiment 5a Auswahlfall und Experiment 5b PV-Curtailment
+
+### Kurzbeschreibung
+- Experiment 5a wurde um den separaten realistischeren Sommer-Hoch-PV-Fall
+  `selected_realistic_load0p4_g1200_t30` ergaenzt. Der urspruengliche
+  48-Fall-Screeningumfang bleibt unveraendert.
+- Experiment 5b implementiert eine gradientenbasierte Optimierung des
+  PV-Curtailment-Faktors fuer genau diesen ausgewaehlten Betriebspunkt.
+
+### Neue und geaenderte Dateien
+- `experiments/exp05a_network_screening.py` - separater 30-C-Auswahlfall,
+  no-PV-Deltas und lokale Sensitivitaeten fuer den Auswahlfall.
+- `experiments/exp05b_optimize_pv_curtailment.py` - neues Experiment mit
+  Sigmoid-Parametrisierung, glatter Export-Penalty, lokalem Adam-Loop,
+  Feasibility-Diagnostik und 1D-Grid-Referenz.
+- `tests/test_exp05a_network_screening_outputs.py` - Tests fuer den separaten
+  Auswahlfall und dessen Artefakte.
+- `tests/test_exp05b_optimize_pv_curtailment_outputs.py` - Schema- und
+  Smoke-Tests fuer Exp. 5b.
+- `docs/context/experiment_plan.md`, `docs/context/validation_status.md`,
+  `docs/context/known_limitations.md` - knappe Einordnung von Exp. 5a/5b.
+
+### Neue Artefakte
+- Exp. 5a:
+  - `experiments/results/exp05a_network_screening/selected_realistic_case.csv/json`
+  - `experiments/results/exp05a_network_screening/selected_realistic_case_sensitivity.csv/json`
+- Exp. 5b:
+  - `experiments/results/exp05b_optimize_pv_curtailment/selected_case_baseline.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/optimization_trace.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/final_solution.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/grid_reference.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/constraint_diagnostics.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/run_summary.csv/json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/metadata.json`
+  - `experiments/results/exp05b_optimize_pv_curtailment/README.md`
+
+### Ergebnisnotizen
+- Der ausgewaehlte 30-C-Fall verletzt bei voller PV den demonstratorinternen
+  Exportzielwert: `p_export_mw = 7.599971`.
+- Bei `c = 0.0` ist die Grenze erreichbar: `p_export_mw = 5.462384`.
+- Der Exp.-5b-Optimizer nutzt nun eine Target-Tracking-Variante mit
+  `p_export_target_mw = 6.99`, `beta = 300` und explizitem Export von
+  `hard_export_violation_mw` sowie `soft_export_violation_mw`.
+- Der Exp.-5b-Optimizer landet bei `c = 0.714203`, also
+  `71.4203 %` PV-Nutzung und `28.5797 %` Abregelung.
+- Finaler Export: `6.990006 MW`, Export-Margin: `0.009994 MW`.
+- Grid-Referenz: groesster zulaessiger Grid-Wert `c = 0.718`.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp05a_network_screening.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp05b_optimize_pv_curtailment.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp05a_network_screening_outputs.py -q`
+  (15 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp05b_optimize_pv_curtailment_outputs.py -q`
+  (9 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pv_model.py -q`
+  (16 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (27 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (8 passed)
+
+### Bekannte Einschraenkungen
+- Exp. 5b optimiert nur einen ausgewaehlten Betriebspunkt, keine Szenariofamilie.
+- Der Exportgrenzwert `7.0 MW` ist ein demonstratorinterner Zielwert, keine
+  normative Netzcode-Grenze.
+- PV bleibt eine wetterabhaengige PQ-Einspeisung; keine PV-Bus-Regelung, keine
+  Q-Limits, keine PV-PQ-Umschaltung und keine Controllerlogik.
+- Keine thermische Betriebsmittelbewertung; Trafo- und Leitungswerte bleiben
+  diagnostische Proxies.
+- Keine Aenderungen an `core/`, `solver/`, `compile/`, Y-Bus oder Residuen.
+
 ## 2026-05-13 - Experiment 5a Netzscreening fuer PV-Curtailment-Vorbereitung
 
 ### Neue Dateien
@@ -19,6 +98,8 @@
 - `experiments/results/exp05a_network_screening/sensitivity_top20.csv/json`
 - `experiments/results/exp05a_network_screening/branch_flows.csv/json`
 - `experiments/results/exp05a_network_screening/run_summary.csv/json`
+- `experiments/results/exp05a_network_screening/selected_realistic_case.csv/json`
+- `experiments/results/exp05a_network_screening/selected_realistic_case_sensitivity.csv/json`
 - `experiments/results/exp05a_network_screening/metadata.json`
 - `experiments/results/exp05a_network_screening/README.md`
 
@@ -32,7 +113,7 @@
 ### Tests
 - Ausgefuehrt:
   `.venv\\Scripts\\python.exe -m pytest tests/test_exp05a_network_screening_outputs.py -q`
-  (13 passed)
+  (15 passed)
 - Ausgefuehrt:
   `.venv\\Scripts\\python.exe experiments/exp05a_network_screening.py`
 

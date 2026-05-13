@@ -227,10 +227,28 @@ Wichtige Dateien:
 - `experiments/exp04_modular_upstream_nn_surrogate.py`
 - `experiments/results/exp04_modular_upstream_nn_surrogate/`
 
-### Experiment 5
+### Experiment 5: Screening und PV-Curtailment
 
-Experiment 5 ist als einfache gradientenbasierte gekoppelte Optimierung geplant,
-aber im aktuellen Changelog noch nicht als abgeschlossen dokumentiert.
+Experiment 5 ist in zwei getrennte Schritte aufgeteilt.
+
+Experiment 5a ist ein reduziertes Netzscreening auf `example_simple()`. Es
+loest 48 PV-Screeningfaelle plus vier no-PV-Referenzen, berechnet
+demonstratorinterne Stressindikatoren, selektiert Top-20-Betriebspunkte und
+berechnet nur fuer diese lokale Sensitivitaeten. Zusaetzlich wird der separate
+Sommer-Hoch-PV-Fall `selected_realistic_load0p4_g1200_t30` berechnet.
+
+Experiment 5b optimiert fuer genau diesen ausgewaehlten Fall den
+PV-Curtailment-Faktor `c in [0, 1]`. Die Optimierung nutzt eine
+Sigmoid-Parametrisierung, einen glatten Export-Proxy `-p_slack_mw` und eine
+1D-Grid-Referenz. Der Exportzielwert `7.0 MW` ist ein demonstratorinterner
+Zielwert, keine normative Netzcode-Grenze.
+
+Wichtige Dateien:
+
+- `experiments/exp05a_network_screening.py`
+- `experiments/exp05b_optimize_pv_curtailment.py`
+- `experiments/results/exp05a_network_screening/`
+- `experiments/results/exp05b_optimize_pv_curtailment/`
 
 ## Repository-Struktur
 
@@ -300,6 +318,8 @@ python experiments/exp01_validate_example_simple.py
 python experiments/exp02_validate_gradients_example_simple.py
 python experiments/exp03_cross_domain_pv_weather.py
 python experiments/exp04_modular_upstream_nn_surrogate.py
+python experiments/exp05a_network_screening.py
+python experiments/exp05b_optimize_pv_curtailment.py
 ```
 
 Plot-Artefakte aus vorhandenen Ergebnisdateien:
@@ -319,6 +339,8 @@ Die Experimente schreiben reproduzierbare CSV-/JSON-Artefakte unter
 - `exp02_example_simple_gradients/`
 - `exp03_cross_domain_pv_weather/`
 - `exp04_modular_upstream_nn_surrogate/`
+- `exp05a_network_screening/`
+- `exp05b_optimize_pv_curtailment/`
 
 Die Plot-Skripte lesen vorhandene Artefakte und erzeugen Abbildungen, ohne neue
 Power-Flow-Solves oder neue Gradientenlaeufe zu starten.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -43,10 +44,28 @@ def test_required_artifacts_are_declared(exp_module):
         "sensitivity_top20.csv",
         "branch_flows.csv",
         "run_summary.csv",
+        "selected_realistic_case.csv",
+        "selected_realistic_case.json",
+        "selected_realistic_case_sensitivity.csv",
+        "selected_realistic_case_sensitivity.json",
         "metadata.json",
         "README.md",
     ]:
         assert name in required
+
+
+def test_selected_realistic_case_spec_matches_prompt(exp_module):
+    spec = exp_module.selected_realistic_case_spec()
+
+    assert spec["case_id"] == "selected_realistic_load0p4_g1200_t30"
+    assert spec["case_type"] == "selected_realistic_case"
+    assert spec["load_multiplier_mv_bus_2"] == pytest.approx(0.4)
+    assert spec["g_poa_wm2"] == pytest.approx(1200.0)
+    assert spec["t_amb_c"] == pytest.approx(30.0)
+    assert spec["wind_ms"] == pytest.approx(2.0)
+    assert spec["curtailment_factor"] == pytest.approx(1.0)
+    assert spec["pv_size_factor"] == pytest.approx(1.0)
+    assert spec["kappa"] == pytest.approx(-0.25)
 
 
 def test_screening_columns_contain_required_fields(exp_module):
@@ -94,6 +113,13 @@ def test_sensitivity_columns_are_top20_curtailment_focused(exp_module):
     assert "criticality_score" in observable_names
     assert "p_export_mw" in observable_names
     assert "vm_mv_bus_2_pu" in observable_names
+
+    selected_observables = [
+        name for name, _ in exp_module.SELECTED_REALISTIC_SENSITIVITY_OBSERVABLES
+    ]
+    assert "p_slack_mw" in selected_observables
+    assert "minus_p_slack_mw" in selected_observables
+    assert "total_p_loss_mw" in selected_observables
 
 
 def test_branch_flow_schema_does_not_claim_loading_percent(exp_module):
@@ -289,6 +315,43 @@ def _stub_summary_row(exp_module):
     )
 
 
+def _stub_selected_realistic_row(exp_module):
+    return replace(
+        _stub_screening_row(exp_module),
+        case_id=exp_module.SELECTED_REALISTIC_CASE_ID,
+        case_type="selected_realistic_case",
+        selected_for_sensitivity=False,
+        top20_rank=0,
+        load_multiplier_mv_bus_2=0.4,
+        g_poa_wm2=1200.0,
+        t_amb_c=30.0,
+        wind_ms=2.0,
+        curtailment_factor=1.0,
+        pv_size_factor=1.0,
+        kappa=-0.25,
+    )
+
+
+def _stub_selected_realistic_sensitivity_row(exp_module):
+    return exp_module.SensitivityRow(
+        case_id=exp_module.SELECTED_REALISTIC_CASE_ID,
+        top20_rank=0,
+        input_parameter="curtailment_factor",
+        input_unit="dimensionless",
+        observable="minus_p_slack_mw",
+        observable_unit="MW",
+        value=2.0,
+        ad_converged=True,
+        load_multiplier_mv_bus_2=0.4,
+        g_poa_wm2=1200.0,
+        t_amb_c=30.0,
+        wind_ms=2.0,
+        curtailment_factor=1.0,
+        pv_size_factor=1.0,
+        kappa=-0.25,
+    )
+
+
 def test_export_all_writes_mandatory_artifacts(exp_module, tmp_path: Path):
     exp_module.export_all(
         [_stub_screening_row(exp_module)],
@@ -325,6 +388,36 @@ def test_exported_csv_schemas_are_stable(exp_module, tmp_path: Path):
         assert rows[0]["input_parameter"] == "curtailment_factor"
 
 
+def test_selected_realistic_artifacts_are_separate(exp_module, tmp_path: Path):
+    exp_module.export_all(
+        [_stub_screening_row(exp_module)],
+        [_stub_top_row(exp_module)],
+        [_stub_sensitivity_row(exp_module)],
+        [_stub_branch_row(exp_module)],
+        [_stub_summary_row(exp_module)],
+        tmp_path,
+        [_stub_selected_realistic_row(exp_module)],
+        [_stub_selected_realistic_sensitivity_row(exp_module)],
+    )
+
+    with (tmp_path / "selected_realistic_case.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["case_id"] == exp_module.SELECTED_REALISTIC_CASE_ID
+    assert rows[0]["case_type"] == "selected_realistic_case"
+    assert float(rows[0]["t_amb_c"]) == pytest.approx(30.0)
+
+    with (tmp_path / "selected_realistic_case_sensitivity.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["case_id"] == exp_module.SELECTED_REALISTIC_CASE_ID
+    assert rows[0]["top20_rank"] == "0"
+
+
 def test_metadata_documents_no_optimization_and_top20_scope(exp_module, tmp_path: Path):
     exp_module.write_metadata(tmp_path)
     with (tmp_path / "metadata.json").open(encoding="utf-8") as handle:
@@ -334,6 +427,10 @@ def test_metadata_documents_no_optimization_and_top20_scope(exp_module, tmp_path
     assert meta["scenario_design"]["n_screening_cases"] == 48
     assert meta["scenario_design"]["n_no_pv_reference_cases"] == 4
     assert meta["scenario_design"]["n_top_cases_for_sensitivity"] == 20
+    assert (
+        meta["scenario_design"]["selected_realistic_case"]["case_id"]
+        == "selected_realistic_load0p4_g1200_t30"
+    )
     assert meta["sensitivity_scope"]["input_parameter"] == "curtailment_factor"
     assert "no optimization" in meta["purpose"].lower()
 
@@ -344,4 +441,5 @@ def test_readme_mentions_non_normative_indicators(exp_module, tmp_path: Path):
 
     assert "does not run an optimization" in text
     assert "demonstrator-internal stress indicators" in text
+    assert "selected_realistic_load0p4_g1200_t30" in text
     assert "no line" in text.lower()

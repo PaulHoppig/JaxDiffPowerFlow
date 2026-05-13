@@ -1,0 +1,264 @@
+# Experiment 5 Plan: Screening und PV-Curtailment-Optimierung
+
+## Ziel
+
+Experiment 5 demonstriert, wie eine vorgelagerte PV-Variable gradientenbasiert
+so angepasst werden kann, dass eine elektrische Zielgroesse im Netz erreicht
+wird. Es ist kein vollstaendiger OPF, sondern ein bewusst kleines
+End-to-End-Demonstrationsproblem:
+
+```text
+Wetter + Curtailment-Faktor
+    -> PV-P/Q-Einspeisung
+    -> AC-Power-Flow
+    -> Slack-Export / Spannung / Verluste
+    -> Gradient nach Curtailment
+```
+
+Der wissenschaftliche Kern ist der Nachweis, dass der unveraenderte
+differenzierbare Power-Flow-Kern fuer eine gekoppelte Optimierungsfrage genutzt
+werden kann.
+
+## Demonstrator und Modellscope
+
+Experiment 5 verwendet ausschliesslich `pandapower.networks.example_simple()`
+im bestehenden scope-matched Modell.
+
+Festgelegt sind:
+
+- Kopplungsbus: `"MV Bus 2"`,
+- ersetztes Element: `sgen "static generator"`,
+- Referenzwerte des ersetzten `sgen`: `P = 2.0 MW`, `Q = -0.5 MVAr`,
+- Blindleistungsverhaeltnis der PV-Einspeisung: `Q/P = -0.25`,
+- PV als wetterabhaengige P/Q-Einspeisung, nicht als spannungsregelnder PV-Bus.
+
+Der numerische Core bleibt unveraendert. Insbesondere werden keine Aenderungen
+an `core/`, `solver/`, `compile/`, Y-Bus, Residuenformulierung oder
+Newton-/Implicit-Solver vorgenommen.
+
+## Experiment 5a: Screening und Fallauswahl
+
+Exp. 5a ist ein reines Forward-Screening. Es fuehrt keine Optimierung durch,
+sondern identifiziert kritische Betriebspunkte fuer die spaetere
+Curtailment-Optimierung.
+
+### Szenariogitter
+
+Das Screening nutzt:
+
+- `load_multiplier_mv_bus_2`: `0.40`, `0.70`, `1.00`, `1.30`,
+- `g_poa_wm2`: `200.0`, `600.0`, `1200.0`,
+- `t_amb_c`: `-10.0`, `5.0`, `25.0`, `45.0`,
+- `wind_ms`: konstant `2.0`,
+- `curtailment_factor`: konstant `1.0`,
+- `pv_size_factor`: konstant `1.0`,
+- `kappa`: konstant `-0.25`.
+
+Damit entstehen `4 x 3 x 4 = 48` PV-Screeningfaelle. Zusaetzlich gibt es je
+Lastniveau einen no-PV-Referenzfall. Diese Referenzen dienen zur Berechnung von
+Deltas, zum Beispiel fuer Slack-Leistung, Export, Spannung am PV-Bus und
+Wirkverluste.
+
+### Bewertung
+
+Exp. 5a bewertet die Betriebspunkte ueber demonstratorinterne Stressindikatoren:
+
+- numerische Konvergenz und Residualnorm,
+- Export am Slack beziehungsweise Netzanschlusspunkt,
+- Spannung am Kopplungsbus und maximale Netzspannung,
+- Verlustdelta gegen no-PV,
+- Trafo-Scheinleistungsdelta als Proxy,
+- Flussbetraege auf aktiven Leitungen als diagnostische Proxies.
+
+Diese Indikatoren sind keine normativen Netzcode- oder
+Betriebsmittelgrenzverletzungen.
+
+### Top-20-Sensitivitaeten
+
+Aus den 48 Screeningfaellen werden die Top-20 nach Kritikalitaet selektiert.
+Nur fuer diese Top-20 werden lokale AD-Sensitivitaeten gegen den
+`curtailment_factor` berechnet. Dadurch bleibt Exp. 5a ein Screening-Experiment
+und vermeidet eine unnoetig breite Sensitivitaetsstudie.
+
+### Separater realistischer Auswahlfall
+
+Zusaetzlich zum unveraenderten 48-Fall-Screening wird ein separater
+realistischerer Sommer-Hoch-PV-Fall berechnet:
+
+```text
+case_id = selected_realistic_load0p4_g1200_t30
+load_multiplier_mv_bus_2 = 0.4
+g_poa_wm2 = 1200.0
+t_amb_c = 30.0
+wind_ms = 2.0
+curtailment_factor = 1.0
+pv_size_factor = 1.0
+kappa = -0.25
+```
+
+Dieser Fall ist nicht Teil des 48-Fall-Screeninggitters. Er dient als
+fachlich plausiblerer Hauptfall fuer Exp. 5b. Die sehr kalten
+`G = 1200 W/m2`, `T_amb = -10 degC`-Faelle bleiben im Screening als
+mathematische Stresspunkte erhalten, sind aber nicht das Hauptnarrativ der
+Optimierung.
+
+## Experiment 5b: PV-Curtailment-Optimierung
+
+Exp. 5b optimiert genau den ausgewaehlten 30-C-Fall aus Exp. 5a. Es gibt keine
+Optimierung ueber mehrere Wetter- oder Lastszenarien.
+
+### Optimierungsvariable
+
+Die physikalische Variable ist der PV-Curtailment-Faktor `c in [0, 1]`:
+
+```text
+c = 1.0  -> volle verfuegbare PV-Leistung
+c = 0.0  -> vollstaendige Abregelung
+P_pv(c) = c * P_pv_available
+Q_pv(c) = -0.25 * P_pv(c)
+```
+
+Optimiert wird jedoch ein freier Skalar `theta`:
+
+```text
+c(theta) = sigmoid(theta)
+```
+
+Dadurch bleibt `c` waehrend des gesamten Optimierungsverlaufs im zulaessigen
+Intervall.
+
+### Exportziel
+
+Die Zielgroesse ist der Export am Slack beziehungsweise Netzanschlusspunkt.
+Die Vorzeichenkonvention lautet:
+
+```text
+p_slack_mw < 0  -> Export ins vorgelagerte Netz
+p_export_mw = max(0, -p_slack_mw)
+```
+
+Fuer den differenzierbaren Optimierungspfad wird der glatte Proxy
+`export_proxy_mw = -p_slack_mw` verwendet. Das ist fuer den ausgewaehlten Fall
+geeignet, weil dieser exportdominiert ist.
+
+Der demonstratorinterne Zielwert lautet:
+
+```text
+p_export_limit_mw = 7.0
+```
+
+Dieser Zielwert ist kein normativer Netzcode-Grenzwert.
+
+### Zielfunktion
+
+Die Zielfunktion kombiniert eine glatte Exportverletzungsstrafe mit einer
+Regularisierung, die unnoetige Abregelung vermeidet:
+
+```text
+violation_mw = softplus(beta * (export_proxy_mw - p_export_limit_mw)) / beta
+objective = (violation_mw / p_scale_mw)^2 + lambda_curtailment * (1 - c)^2
+```
+
+Der aktuelle Lauf nutzt:
+
+```text
+beta = 300
+p_scale_mw = 1.0
+lambda_curtailment = 1e-4
+```
+
+Die Zielfunktion trackt `p_export_target_mw = 6.99 MW`, also einen Zielwert
+knapp unterhalb der harten `7.0 MW`-Grenze. Zusaetzlich wird mit `beta = 300`
+eine schaerfere glatte Softplus-Penalty gegen die Exportgrenze genutzt. Die
+Artefakte exportieren sowohl `hard_export_violation_mw` als auch
+`soft_export_violation_mw`, damit der Unterschied zwischen Berichtsgrenze und
+glatter AD-Penalty transparent bleibt.
+
+### Optimierer und Referenz
+
+Exp. 5b verwendet einen kleinen lokal implementierten Adam-Loop ohne neue
+Dependencies. Zusaetzlich wird eine eindimensionale Grid-Referenz ueber
+`curtailment_factor in [0, 1]` berechnet. Die Grid-Referenz dient nur als
+Plausibilitaetscheck fuer dieses eindimensionale Demonstrationsproblem, nicht
+als skalierbarer Optimierer.
+
+## Artefakte
+
+Exp. 5a schreibt nach:
+
+```text
+experiments/results/exp05a_network_screening/
+```
+
+Wichtige Artefakte:
+
+- `screening_results.csv/json`,
+- `top_critical_cases.csv/json`,
+- `sensitivity_top20.csv/json`,
+- `selected_realistic_case.csv/json`,
+- `selected_realistic_case_sensitivity.csv/json`,
+- `branch_flows.csv/json`,
+- `run_summary.csv/json`,
+- `metadata.json`,
+- `README.md`.
+
+Exp. 5b schreibt nach:
+
+```text
+experiments/results/exp05b_optimize_pv_curtailment/
+```
+
+Wichtige Artefakte:
+
+- `selected_case_baseline.csv/json`,
+- `optimization_trace.csv/json`,
+- `final_solution.csv/json`,
+- `grid_reference.csv/json`,
+- `constraint_diagnostics.csv/json`,
+- `run_summary.csv/json`,
+- `metadata.json`,
+- `README.md`.
+
+## Aktueller Ergebnisstand
+
+Der ausgewaehlte 30-C-Fall verletzt bei voller PV den Zielwert:
+
+```text
+p_export_mw = 7.599971
+p_slack_mw  = -7.599971
+p_pv_mw     = 2.146286
+q_pv_mvar   = -0.536571
+```
+
+Bei `c = 0.0` ist die Grenze erreichbar:
+
+```text
+p_export_mw = 5.462384
+```
+
+Die finale Exp.-5b-Loesung erreicht:
+
+```text
+curtailment_factor = 0.714203
+PV-Nutzung         = 71.4203 %
+PV-Abregelung      = 28.5797 %
+p_export_mw        = 6.990006
+Export-Margin      = 0.009994 MW
+Hard Violation     = 0.000000 MW
+Soft Violation     = 0.000162 MW
+Grid-Referenz c    = 0.718000
+```
+
+## Grenzen
+
+Nicht enthalten sind:
+
+- vollstaendige PV-Bus-Spannungsregelung,
+- Q-Limits,
+- PV-PQ-Umschaltung,
+- Controllerlogik,
+- Optimierung ueber mehrere Last- oder Wetterszenarien,
+- normative thermische Betriebsmittelgrenzwertbewertung.
+
+Alle kritischen Zustaende in Exp. 5a und der Exportzielwert in Exp. 5b sind
+demonstratorinterne Indikatoren.

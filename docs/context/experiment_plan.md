@@ -287,6 +287,10 @@ Empfohlen:
 
 ## Experiment 5: Gradientenbasierte gekoppelte Optimierung
 
+**Status: umgesetzt** - siehe `experiments/exp05a_network_screening.py`,
+`experiments/exp05b_optimize_pv_curtailment.py` und
+`docs/context/experiment_05_plan.md`.
+
 ### Ziel
 
 Demonstration, dass vorgelagerte Variablen gradientenbasiert so angepasst werden können, dass eine elektrische Zielgröße erreicht wird.

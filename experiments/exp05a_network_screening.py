@@ -73,6 +73,12 @@ EXP5A_KAPPA: float = PV_Q_OVER_P
 TRAFO_RATING_PROXY_MVA: float = 25.0
 TOP_N_CRITICAL_CASES: int = 20
 
+SELECTED_REALISTIC_CASE_ID = "selected_realistic_load0p4_g1200_t30"
+SELECTED_REALISTIC_LOAD_MULTIPLIER = 0.40
+SELECTED_REALISTIC_G_POA_WM2 = 1200.0
+SELECTED_REALISTIC_T_AMB_C = 30.0
+SELECTED_REALISTIC_WIND_MS = 2.0
+
 SENSITIVITY_OBSERVABLES: tuple[tuple[str, str], ...] = (
     ("p_pv_mw", "MW"),
     ("q_pv_mvar", "MVAr"),
@@ -82,6 +88,17 @@ SENSITIVITY_OBSERVABLES: tuple[tuple[str, str], ...] = (
     ("total_p_loss_mw", "MW"),
     ("s_trafo_hv_mva", "MVA"),
     ("criticality_score", "dimensionless"),
+)
+
+SELECTED_REALISTIC_SENSITIVITY_OBSERVABLES: tuple[tuple[str, str], ...] = (
+    ("p_pv_mw", "MW"),
+    ("q_pv_mvar", "MVAr"),
+    ("p_slack_mw", "MW"),
+    ("minus_p_slack_mw", "MW"),
+    ("p_export_mw", "MW"),
+    ("vm_mv_bus_2_pu", "p.u."),
+    ("total_p_loss_mw", "MW"),
+    ("s_trafo_hv_mva", "MVA"),
 )
 
 REQUIRED_ARTIFACTS: tuple[str, ...] = (
@@ -95,6 +112,10 @@ REQUIRED_ARTIFACTS: tuple[str, ...] = (
     "branch_flows.json",
     "run_summary.csv",
     "run_summary.json",
+    "selected_realistic_case.csv",
+    "selected_realistic_case.json",
+    "selected_realistic_case_sensitivity.csv",
+    "selected_realistic_case_sensitivity.json",
     "metadata.json",
     "README.md",
 )
@@ -910,6 +931,10 @@ def _sensitivity_scalar(
         return injection.p_pv_mw
     if observable == "q_pv_mvar":
         return injection.q_pv_mvar
+    if observable == "p_slack_mw":
+        return p_slack
+    if observable == "minus_p_slack_mw":
+        return -p_slack
     if observable == "p_export_mw":
         return p_export
     if observable == "vm_mv_bus_2_pu":
@@ -972,6 +997,112 @@ def compute_sensitivity_rows(
                     kappa=EXP5A_KAPPA,
                 )
             )
+    return rows
+
+
+def selected_realistic_case_spec() -> dict:
+    """Return the fixed realistic summer high-PV case used by Experiment 5b."""
+
+    return {
+        "case_id": SELECTED_REALISTIC_CASE_ID,
+        "case_type": "selected_realistic_case",
+        "load_multiplier_mv_bus_2": SELECTED_REALISTIC_LOAD_MULTIPLIER,
+        "g_poa_wm2": SELECTED_REALISTIC_G_POA_WM2,
+        "t_amb_c": SELECTED_REALISTIC_T_AMB_C,
+        "wind_ms": SELECTED_REALISTIC_WIND_MS,
+        "curtailment_factor": CURTAILMENT_FACTOR,
+        "pv_size_factor": PV_SIZE_FACTOR,
+        "kappa": EXP5A_KAPPA,
+    }
+
+
+def build_no_pv_reference(load_multiplier: float) -> tuple[dict, ScenarioBase, list[BranchFlowRow]]:
+    """Solve the no-PV reference for one load multiplier."""
+
+    scenario = build_scenario_base(load_multiplier)
+    case_id = f"ref_load{_format_level(load_multiplier)}_no_pv"
+    row, branches = _solve_case(
+        scenario,
+        case_id=case_id,
+        case_type="no_pv_reference",
+        g_poa_wm2=0.0,
+        t_amb_c=25.0,
+        wind_ms=WIND_MS,
+        curtailment_factor=CURTAILMENT_FACTOR,
+        pv_size_factor=PV_SIZE_FACTOR,
+    )
+    return _apply_reference_deltas(row, None), scenario, branches
+
+
+def solve_selected_realistic_case() -> tuple[ScreeningRow, ScenarioBase, dict, list[BranchFlowRow]]:
+    """Solve the selected 30 degC summer high-PV case with no-PV deltas."""
+
+    spec = selected_realistic_case_spec()
+    reference, scenario, _ = build_no_pv_reference(spec["load_multiplier_mv_bus_2"])
+    row, branches = _solve_case(
+        scenario,
+        case_id=spec["case_id"],
+        case_type=spec["case_type"],
+        g_poa_wm2=spec["g_poa_wm2"],
+        t_amb_c=spec["t_amb_c"],
+        wind_ms=spec["wind_ms"],
+        curtailment_factor=spec["curtailment_factor"],
+        pv_size_factor=spec["pv_size_factor"],
+    )
+    row = _apply_reference_deltas(row, reference)
+    row["selected_for_sensitivity"] = False
+    row["top20_rank"] = 0
+    row["notes"] = (
+        (row["notes"] + "; ") if row["notes"] else ""
+    ) + "Selected realistic summer high-PV case for Exp. 5b."
+    return ScreeningRow(**row), scenario, reference, branches
+
+
+def compute_selected_realistic_sensitivity_rows(
+    selected_row: ScreeningRow,
+    scenario: ScenarioBase,
+    reference: dict,
+) -> list[SensitivityRow]:
+    """Compute local curtailment sensitivities for the selected realistic case."""
+
+    row_dict = asdict(selected_row)
+    rows: list[SensitivityRow] = []
+    unit_map = dict(SELECTED_REALISTIC_SENSITIVITY_OBSERVABLES)
+    for observable, _ in SELECTED_REALISTIC_SENSITIVITY_OBSERVABLES:
+        try:
+            grad_val = jax.grad(
+                lambda curtailment: _sensitivity_scalar(
+                    curtailment,
+                    scenario,
+                    row_dict,
+                    reference,
+                    observable,
+                )
+            )(jnp.asarray(CURTAILMENT_FACTOR, dtype=jnp.float64))
+            value = float(grad_val)
+            ok = math.isfinite(value)
+        except Exception:
+            value = float("nan")
+            ok = False
+        rows.append(
+            SensitivityRow(
+                case_id=selected_row.case_id,
+                top20_rank=0,
+                input_parameter="curtailment_factor",
+                input_unit="dimensionless",
+                observable=observable,
+                observable_unit=unit_map[observable],
+                value=value,
+                ad_converged=ok,
+                load_multiplier_mv_bus_2=selected_row.load_multiplier_mv_bus_2,
+                g_poa_wm2=selected_row.g_poa_wm2,
+                t_amb_c=selected_row.t_amb_c,
+                wind_ms=selected_row.wind_ms,
+                curtailment_factor=selected_row.curtailment_factor,
+                pv_size_factor=selected_row.pv_size_factor,
+                kappa=selected_row.kappa,
+            )
+        )
     return rows
 
 
@@ -1044,12 +1175,43 @@ def _summary_rows(screening_rows: list[ScreeningRow], sensitivity_rows: list[Sen
     ]
 
 
+def append_selected_realistic_summary(
+    summary_rows: list[RunSummaryRow],
+    selected_row: ScreeningRow,
+    selected_sensitivity_rows: list[SensitivityRow],
+) -> list[RunSummaryRow]:
+    """Append compact summary metrics for the selected realistic add-on case."""
+
+    return summary_rows + [
+        RunSummaryRow(
+            "n_selected_realistic_cases",
+            1.0,
+            "count",
+            "Separate add-on case; not part of the 48-case screening grid.",
+        ),
+        RunSummaryRow(
+            "selected_realistic_p_export_mw",
+            selected_row.p_export_mw,
+            "MW",
+            "Full-PV export for the Exp. 5b demonstration case.",
+        ),
+        RunSummaryRow(
+            "selected_realistic_sensitivity_rows",
+            float(len(selected_sensitivity_rows)),
+            "count",
+            "Local curtailment sensitivities for selected realistic case.",
+        ),
+    ]
+
+
 def run_experiment() -> tuple[
     list[ScreeningRow],
     list[TopCriticalCaseRow],
     list[SensitivityRow],
     list[BranchFlowRow],
     list[RunSummaryRow],
+    ScreeningRow,
+    list[SensitivityRow],
 ]:
     """Run Experiment 5a and return all artifact rows."""
 
@@ -1120,7 +1282,26 @@ def run_experiment() -> tuple[
     screening_rows = [ScreeningRow(**row) for row in ranked_rows]
     top_rows = _top_case_rows(top_ranked)
     summary_rows = _summary_rows(screening_rows, sensitivity_rows)
-    return screening_rows, top_rows, sensitivity_rows, branch_rows, summary_rows
+    selected_row, selected_scenario, selected_reference, _ = solve_selected_realistic_case()
+    selected_sensitivity_rows = compute_selected_realistic_sensitivity_rows(
+        selected_row,
+        selected_scenario,
+        selected_reference,
+    )
+    summary_rows = append_selected_realistic_summary(
+        summary_rows,
+        selected_row,
+        selected_sensitivity_rows,
+    )
+    return (
+        screening_rows,
+        top_rows,
+        sensitivity_rows,
+        branch_rows,
+        summary_rows,
+        selected_row,
+        selected_sensitivity_rows,
+    )
 
 
 def _to_native(obj):
@@ -1184,6 +1365,11 @@ def write_metadata(results_dir: Path) -> None:
             "n_no_pv_reference_cases": no_pv_reference_count(),
             "n_forward_cases_total": screening_case_count() + no_pv_reference_count(),
             "n_top_cases_for_sensitivity": TOP_N_CRITICAL_CASES,
+            "selected_realistic_case": selected_realistic_case_spec(),
+            "selected_realistic_case_scope": (
+                "Separate add-on case for Exp. 5b; not part of the 48-case "
+                "screening grid or Top-20 ranking."
+            ),
         },
         "criticality_definition": {
             "note": (
@@ -1211,6 +1397,10 @@ def write_metadata(results_dir: Path) -> None:
             "computed_only_for": "Top-20 screening cases by criticality_score",
             "observables": [
                 {"name": name, "unit": unit} for name, unit in SENSITIVITY_OBSERVABLES
+            ],
+            "selected_realistic_case_observables": [
+                {"name": name, "unit": unit}
+                for name, unit in SELECTED_REALISTIC_SENSITIVITY_OBSERVABLES
             ],
         },
         "solver_options": {
@@ -1251,10 +1441,25 @@ operating points for a later PV-curtailment experiment.
   score.
 - `sensitivity_top20.csv/json`: local AD sensitivities with respect to
   `curtailment_factor`, computed only for the Top-20 cases.
+- `selected_realistic_case.csv/json`: a separate summer high-PV add-on case
+  with `load_multiplier = 0.4`, `G = 1200 W/m2`, and `T_amb = 30 degC`.
+- `selected_realistic_case_sensitivity.csv/json`: local AD sensitivities for
+  the selected add-on case; this is the hand-off point for Experiment 5b.
 - `branch_flows.csv/json`: active line apparent-power flow proxies; no line
   loading percentages are claimed.
 - `run_summary.csv/json`: compact counts and extrema.
 - `metadata.json`: reproducibility metadata and criticality definitions.
+
+## Selected realistic case
+
+The original screening grid remains unchanged: 48 PV screening cases plus four
+no-PV references. The `G = 1200 W/m2`, `T_amb = -10 degC` case remains useful
+as a mathematical stress point, because cold PV modules yield high active power.
+For the curtailment narrative in Experiment 5b, this add-on additionally solves
+`selected_realistic_load0p4_g1200_t30`, a warmer summer high-PV case with low
+local load. It is more plausible as a demonstrator for a real network-operator
+export-management question while still preserving the stress behavior needed
+for optimization.
 
 ## Important scope note
 
@@ -1274,7 +1479,11 @@ def export_all(
     branch_rows: list[BranchFlowRow],
     summary_rows: list[RunSummaryRow],
     results_dir: Path,
+    selected_rows: list[ScreeningRow] | None = None,
+    selected_sensitivity_rows: list[SensitivityRow] | None = None,
 ) -> None:
+    selected_rows = selected_rows or []
+    selected_sensitivity_rows = selected_sensitivity_rows or []
     _write_csv(results_dir / "screening_results.csv", screening_rows, SCREENING_COLUMNS)
     _write_json(results_dir / "screening_results.json", screening_rows)
     _write_csv(results_dir / "top_critical_cases.csv", top_rows, TOP_CRITICAL_COLUMNS)
@@ -1285,6 +1494,17 @@ def export_all(
     _write_json(results_dir / "branch_flows.json", branch_rows)
     _write_csv(results_dir / "run_summary.csv", summary_rows, RUN_SUMMARY_COLUMNS)
     _write_json(results_dir / "run_summary.json", summary_rows)
+    _write_csv(results_dir / "selected_realistic_case.csv", selected_rows, SCREENING_COLUMNS)
+    _write_json(results_dir / "selected_realistic_case.json", selected_rows)
+    _write_csv(
+        results_dir / "selected_realistic_case_sensitivity.csv",
+        selected_sensitivity_rows,
+        SENSITIVITY_COLUMNS,
+    )
+    _write_json(
+        results_dir / "selected_realistic_case_sensitivity.json",
+        selected_sensitivity_rows,
+    )
     write_metadata(results_dir)
     write_readme(results_dir)
 
@@ -1300,6 +1520,8 @@ def main() -> None:
         sensitivity_rows,
         branch_rows,
         summary_rows,
+        selected_row,
+        selected_sensitivity_rows,
     ) = run_experiment()
     export_all(
         screening_rows,
@@ -1308,6 +1530,8 @@ def main() -> None:
         branch_rows,
         summary_rows,
         RESULTS_DIR,
+        [selected_row],
+        selected_sensitivity_rows,
     )
     print("\nRun summary:")
     for row in summary_rows:
@@ -1319,6 +1543,13 @@ def main() -> None:
             f"score={row.criticality_score:.3f} "
             f"p_export={row.p_export_mw:.3f} MW max_vm={row.max_vm_pu:.5f}"
         )
+    print("\nSelected realistic case for Experiment 5b:")
+    print(
+        f"  {selected_row.case_id:<35} "
+        f"p_export={selected_row.p_export_mw:.3f} MW "
+        f"p_pv={selected_row.p_pv_mw:.3f} MW "
+        f"vm_mv_bus_2={selected_row.vm_mv_bus_2_pu:.5f} p.u."
+    )
     print("\nExported artifacts:")
     for name in REQUIRED_ARTIFACTS:
         print(f"  {name}")

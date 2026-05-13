@@ -181,11 +181,33 @@ Q/P:               -0.25
 
 Der Baseline-Check entfernt das statische `sgen`, injiziert bei `G = 1000 W/m²` und `T_cell = 25 °C` dieselben P/Q-Werte über das JAX-kompatible Interface und vergleicht relevante Netzgrößen.
 
+## Validiert: Experiment 5a/5b Curtailment-Demonstrator
+
+Umgesetzt und getestet:
+
+- Experiment 5a bleibt ein Screening- und Fallauswahl-Experiment auf
+  `example_simple()` mit 48 PV-Screeningfaellen, vier no-PV-Referenzen,
+  Top-20-Sensitivitaeten und einem separaten realistischeren 30-C-Auswahlfall.
+- Experiment 5b optimiert den PV-Curtailment-Faktor fuer genau diesen
+  Auswahlfall mit einer glatten Export-Penalty, Sigmoid-Parametrisierung und
+  1D-Grid-Referenz.
+- Der volle-PV-Auswahlfall exportiert `7.599971 MW` und verletzt damit den
+  demonstratorinternen Zielwert von `7.0 MW`.
+- Der zero-PV-Endpunkt exportiert `5.462384 MW`; der Zielwert ist im
+  eindimensionalen Curtailment-Problem erreichbar.
+- Die finale Exp.-5b-Loesung erreicht `p_export_mw = 6.990006` bei
+  `curtailment_factor = 0.714203`; die harte Exportverletzung ist `0.0 MW`.
+
+Diese Validierung ist demonstratorbezogen. Der Exportzielwert ist keine
+normative Netzcode-Grenze, und thermische Betriebsmittelgrenzwerte werden nicht
+bewertet.
+
 ## Noch nicht vollständig validiert
 
 - End-to-End-Experiment 3 mit variierenden Wettergrößen auf `example_simple()`.
 - Modularitätsvergleich mehrerer Upstream-Modelle auf `example_simple()`.
-- Gradientenbasierte gekoppelte Optimierung auf `example_simple()`.
+- Gradientenbasierte Optimierung ueber mehrere Szenarien oder mit
+  Controller-/Q-Limit-Logik.
 - vollständiges PV-Bus-Enforcement für `gen`.
 - Q-Limits und PV↔PQ-Umschaltung.
 - vollständige `pandapower`-Trafo-Parität.
