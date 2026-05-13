@@ -1,0 +1,65 @@
+Softwareueberblick fuer KI-Modelle: diffpf
+
+Projektziel
+diffpf ist ein Proof of Concept fuer einen differentiierbaren stationaeren AC-Leistungsflusskern in JAX. Ziel ist nicht ein grosses Industriewerkzeug, sondern eine saubere, wissenschaftlich nachvollziehbare Physikschicht, die in groessere differentiierbare Rechengraphen eingebettet werden kann, z. B. Wetter -> PV-Modell -> PV-Einspeisung -> AC-Netzmodell -> Knotenspannung. Der Mehrwert liegt in modelluebergreifenden Sensitivitaeten, nicht zwingend im Training des vorgelagerten Modells.
+
+Methodische Fixpunkte
+Die folgenden Entscheidungen sind bewusst gesetzt und sollen nicht still veraendert werden:
+- Spannungen werden rechteckig dargestellt: V = Vr + j Vi.
+- Der Solver arbeitet mit reellen Zustandsvektoren der Nicht-Slack-Busse: [Vr | Vi].
+- Die elektrische Physik bleibt komplex: I = Y_bus @ V und S = V * conj(I).
+- Es wird konsequent im Per-Unit-System gerechnet.
+- Die Topologie ist statisch, Parameter und Zustaende sind differenzierbar.
+- Der stationaere Power Flow wird mit Newton-Raphson geloest.
+- Gradienten durch den konvergierten Solver laufen ueber implizite Differenzierung mit custom_root, nicht ueber das Unrolling der Newton-Iterationen.
+- core/, solver/ und pipeline/ muessen JIT-kompatibel bleiben.
+
+Aktuelles PoC-Netz
+Das betrachtete Netz ist ein 3-Bus-System:
+- Bus 0: Slack / Umspannwerk
+- Bus 1: Wohngebiet / Last
+- Bus 2: PV-Park
+V1 unterstuetzt PQ-Busse, einen Slack-Bus, Pi-Modell-Leitungen, bekannte P/Q-Einspeisungen, Per-Unit-Rechnung und stationaere AC-Physik. Nicht Teil von V1 sind Transformatoren, PV-Bus-Gleichungen, grosse Benchmark-Netze und Industriefunktionalitaet.
+
+Schichten und Abhaengigkeitsrichtung
+Die wichtigste Architekturregel ist die Trennung zwischen menschenfreundlicher Eingabe und arraybasiertem JAX-Kern.
+
+src/diffpf/io/
+Liest JSON-Netzdefinitionen und validiert Rohdaten. reader.py erzeugt RawNetwork-Dataclasses. parser.py mappt externe Bus-IDs auf interne Indizes, rechnet physikalische Groessen in p.u. um, zerlegt die Slack-Spannung in Vr/Vi und erzeugt (CompiledTopology, NetworkParams, PFState). core/ importiert nie aus io/.
+
+src/diffpf/core/
+Enthaelt den reinen numerischen Kern und keine Parser-, JSON- oder pandapower-Logik. Wichtige Dateien:
+- types.py: BusSpec, LineSpec, NetworkSpec, CompiledTopology, NetworkParams, PFState als JAX-kompatible Dataclasses/Pytrees.
+- units.py: BaseValues fuer p.u.-Konvertierung.
+- ybus.py: build_ybus() fuer Pi-Leitungen per Stamping.
+- residuals.py: state_to_voltage(), calc_power_injection(), power_flow_residual(), residual_loss().
+- observables.py: solver-unabhaengige Auswertung aus geloestem Zustand, z. B. |V|, Winkel, Slack-Leistung, Netzverluste und Leitungsfluesse.
+
+src/diffpf/compile/
+compile_network() baut aus NetworkSpec die internen JAX-Strukturen CompiledTopology und NetworkParams. Die Topologie wird statisch behandelt; physikalische Parameter bleiben differenzierbar.
+
+src/diffpf/solver/
+newton.py enthaelt den gedampften Newton-Raphson-Solver mit jax.lax.while_loop und jax.jacfwd.
+implicit.py enthaelt solve_power_flow_implicit() auf Basis von jax.lax.custom_root. Der Forward-Solve nutzt weiterhin Newton, aber die Gradienten entstehen ueber das linearisierte Root-Problem am Konvergenzpunkt.
+
+src/diffpf/validation/
+Enthaelt Validierungslogik, die nicht Teil des Kernsolvers ist. pandapower darf nur hier und in tests importiert werden. finite_diff.py enthaelt zentrale finite Differenzen. pandapower_ref.py validiert den Forward-Solve gegen pandapower. gradient_check.py validiert implizite Gradienten gegen finite Differenzen.
+
+experiments/
+Ein Script pro wissenschaftlichem Experiment.
+
+tests/
+pytest-Suite, die core, parser, solver, validation und Observables absichert. Neue Kernfunktionen sollen immer Tests bekommen.
+
+Wichtige Designprinzipien fuer weitere Implementierung
+- Keine stillen Aenderungen an Residuenformulierung oder Koordinatenwahl.
+- Kein numpy im Hot Path; dort jax.numpy verwenden.
+- Keine Python-if-Abfragen auf Tracer-Werten in core, solver oder pipeline.
+- Keine globalen Zustandsvariablen im numerischen Kern.
+- Parameter muessen im NetworkParams-Pytree liegen, nicht versteckt in Closures.
+- pandapower bleibt Referenz und darf nicht in core, solver, models oder pipeline importiert werden.
+- Neue Dependencies nur nach Rueckfrage.
+- Kleinere funktionale Hilfsfunktionen sind bevorzugt gegenueber Klassenhierarchien.
+
+
+Wenn ein KI-Modell an diesem Projekt weiterarbeitet, sollte es zuerst die vorhandenen Typen und Funktionen wiederverwenden, dann Tests ergaenzen und erst danach neue Abstraktionen einfuehren. Der Grid-Core soll stabil bleiben; Erweiterungen sollen ueber Modelle, Pipeline und Experimente angebunden werden.
