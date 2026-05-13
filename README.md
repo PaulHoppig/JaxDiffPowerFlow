@@ -1,347 +1,366 @@
 # diffpf
 
-**Differenzierbarer AC-Power-Flow-Kern in Python/JAX zur Kopplung elektrischer Netzphysik mit vorgelagerten Modellen**
+`diffpf` ist ein Proof of Concept fuer einen differenzierbaren stationaeren
+AC-Power-Flow-Kern in JAX. Das Projekt ist im Rahmen einer Bachelorarbeit
+entstanden und untersucht, wie elektrische Netzphysik als glatte Rechenschicht
+in groessere Modellketten eingebettet werden kann.
 
-`diffpf` ist ein Proof of Concept für einen modularen, differentiierbaren stationären AC-Leistungsflusskern in JAX. Ziel ist **nicht** der Aufbau eines vollständigen industriellen Netzsimulators, sondern einer sauberen, wissenschaftlich nachvollziehbaren Physikschicht, die in größere differentiierbare Rechengraphen eingebettet werden kann – zum Beispiel:
+Der zentrale Anwendungsfall ist nicht nur
 
-**Wetter → PV-Modell → PV-Einspeisung → AC-Netzmodell → Spannungen / Verluste / Netzbezug**
+```text
+P/Q-Injektion -> AC-Power-Flow -> Knotenspannungen
+```
 
-Der methodische Mehrwert liegt in der **modellübergreifenden Differenzierbarkeit**: Sensitivitäten sollen nicht nur nach elektrischen Eingangsgrößen, sondern auch nach **vorgelagerten, nicht-elektrischen Größen** wie Einstrahlung oder Temperatur berechenbar werden.
+sondern eine End-to-End-Kette wie
 
----
+```text
+Wetter -> PV-Modell -> P/Q-Einspeisung -> AC-Power-Flow -> elektrische Observables
+```
 
-## Motivation
+Damit werden Sensitivitaeten nicht-elektrischer Groessen wie Einstrahlung,
+Umgebungstemperatur oder Windgeschwindigkeit auf elektrische Zielgroessen
+direkt per Automatic Differentiation berechenbar.
 
-Klassische Power-Flow-Modelle sind zentral für Analyse, Planung und Betrieb elektrischer Netze. In vielen modernen Anwendungen hängen netzseitige Zielgrößen jedoch nicht isoliert von elektrischen Sollwerten ab, sondern von **gekoppelten vorgelagerten Modellen**, zum Beispiel aus Wetter, Erzeugung, Last oder datengetriebenen Ersatzmodellen.
+## Einordnung
 
-`diffpf` adressiert genau diese Schnittstelle:
+`diffpf` ist ein wissenschaftlicher Demonstrator. Es ist kein vollstaendiger
+Ersatz fuer `pandapower`, kein industrielles Netzberechnungsframework und kein
+OPF-Tool. Der Wert des Projekts liegt in der nachvollziehbaren Kopplung von
+stationaerer AC-Netzphysik, impliziter Differentiation und vorgelagerten
+JAX-kompatiblen Modellen.
 
-- stationäre AC-Netzphysik bleibt explizit modelliert,
-- der Power-Flow-Kern wird als **differenzierbare Rechenschicht** formuliert,
-- Gradienten können über Modellgrenzen hinweg propagiert werden,
-- der numerische Netzkern bleibt dabei möglichst **modular und unverändert wiederverwendbar**.
+Die wichtigsten Leitfragen sind:
 
----
-
-## Projektziel
-
-Die Arbeit soll zeigen, dass ein AC-Power-Flow-Kern in JAX
-
-1. elektrisch korrekt rechnet,
-2. lokal korrekt differenzierbar ist,
-3. mit unterschiedlichen vorgelagerten Modellen gekoppelt werden kann,
-4. und dadurch modellübergreifende Sensitivitäts- und einfache Optimierungsaufgaben unterstützt.
-
----
-
-## Was das Projekt ist – und was nicht
-
-### Das Projekt ist
-
-- ein **differenzierbarer AC-Power-Flow-Demonstrator** in Python/JAX,
-- eine **physikalische Rechenschicht** für gekoppelte Modellketten,
-- eine Grundlage für **Cross-Domain-Sensitivitätsanalysen**,
-- ein methodischer Ausgangspunkt für spätere gekoppelte Optimierungs- oder Lernaufgaben.
-
-### Das Projekt ist nicht
-
-- **kein** neues oder überlegenes elektrisches Lastflussverfahren,
-- **kein** vollständiges Netzberechnungsframework,
-- **kein** Nachweis allgemeiner Echtzeitfähigkeit,
-- **keine** allgemeine Überlegenheit gegenüber klassischen PF-/OPF-Ansätzen,
-- **keine** Untersuchung großer realer Netze oder diskreter Regelungslogiken.
-
----
+- Rechnet der JAX-Kern stationaere AC-Betriebspunkte konsistent?
+- Stimmen lokale implizite Gradienten mit zentralen Finite Differences ueberein?
+- Kann ein `pandapower`-naher Demonstrator in die JAX-Strukturen ueberfuehrt werden?
+- Bleibt derselbe Power-Flow-Kern nutzbar, wenn verschiedene Upstream-Modelle
+  P/Q-Injektionen liefern?
 
 ## Methodischer Kern
 
-Das Projekt betrachtet Modellketten der Form:
-
-```text
-vorgelagertes Modell -> elektrische Einspeisung/Last -> AC-Power-Flow -> netzseitige Zielgröße
-```
-
-Der stationäre Betriebspunkt wird durch einen Power-Flow-Solver bestimmt. Die Sensitivitäten werden **am gelösten Betriebspunkt** über **implizite Differenzierung** berechnet, statt durch das vollständige Unrolling aller Newton-Schritte.
-
-### Mathematische Grundform
-
-Die Physik basiert auf der komplexen AC-Formulierung:
+Die elektrische Physik wird intern in komplexer Form ausgewertet:
 
 ```text
 I = Y_bus @ V
-S_calc = V * conj(I)
+S = V * conj(I)
 ```
 
-Daraus werden die Residuen gebildet:
+Der Solverzustand bleibt reell und nutzt rechteckige Spannungskoordinaten
+`V = V_r + j V_i`. Fuer PQ-Busse werden P- und Q-Residuen geloest. Fuer
+idealisierte PV-Busse ist im Kern eine Spannungsbetragsgleichung vorbereitet;
+die validierten `pandapower`-Experimente verwenden jedoch bewusst den
+scope-matched PQ-Modus ohne vollstaendige Generator-Spannungsregelung.
+
+Fest gesetzte Designentscheidungen:
+
+- durchgaengiges Per-Unit-System,
+- statische Topologie und differenzierbare Parameter in `NetworkParams`,
+- Newton-Raphson-Solve mit `jax.lax.while_loop`,
+- Jacobi-Matrix im Solver via `jax.jacfwd`,
+- Gradienten am konvergierten Betriebspunkt via `jax.lax.custom_root`,
+- kein Unrolling der Newton-Iterationen fuer die Solverableitung,
+- `float64` in JAX, aktiviert in `src/diffpf/__init__.py`.
+
+## Datenpipeline
+
+Die Software trennt bewusst Eingabe, statische Kompilierung und numerischen
+Kern:
 
 ```text
-r_P = P_spec - Re(S_calc)
-r_Q = Q_spec - Im(S_calc)
+pandapower net oder JSON
+    -> RawNetwork / NetworkSpec
+    -> compile_network(...)
+    -> CompiledTopology + NetworkParams + PFState
+    -> Newton / implicit solver
+    -> Observables, Validierung, Experimente
 ```
 
-Zusätzlich wird eine Residual-Loss der Form
+`pandapower` bleibt Referenz- und Importwerkzeug. Der numerische Kern in
+`core/`, `compile/` und `solver/` bleibt frei von `pandapower`-Abhaengigkeiten.
+
+## Aktueller Modellumfang
+
+Unterstuetzt sind im aktuellen Projektstand:
+
+- stationaere symmetrische AC-Netze,
+- genau ein Slack-Bus,
+- PQ-Busse und eine idealisierte PV-Bus-Residualform im Kern,
+- feste P/Q-Lasten und -Einspeisungen,
+- Leitungen im Pi-Ersatzschaltbild,
+- Zweiwicklungs-Transformatoren mit Tap und Phasenverschiebung,
+- Shunts als konstante Admittanzen,
+- einfache Switch-Vorverarbeitung,
+- `pandapower`-Import fuer einen kontrollierten Teilumfang.
+
+Die `pandapower`-Pipeline unterstuetzt insbesondere `bus`, `ext_grid`, `load`,
+`sgen`, `gen`, `line`, `trafo`, `shunt` und einfache Switches. Geschlossene
+Bus-Bus-Switches werden als Bus-Fusion behandelt; offene Line- oder
+Trafo-Switches deaktivieren das jeweilige Element im unterstuetzten Scope.
+
+Nicht Teil des aktuellen Scopes sind vollstaendige `pandapower`-Kompatibilitaet,
+Controller, unsymmetrische oder dreiphasige Lastfluesse, Dreiwicklungs-
+Transformatoren, `ward`/`xward`, `dcline`, detaillierte offene Leitungsenden,
+Generator-Q-Limits und PV-PQ-Umschaltung.
+
+## Demonstratoren
+
+Der urspruengliche 3-Bus-Fall in `cases/three_bus_poc.py` und
+`cases/three_bus_poc.json` bleibt als historischer Minimal- und Kontrollfall
+erhalten:
+
+- Bus 0: Slack / Umspannwerk,
+- Bus 1: Last,
+- Bus 2: PV-Einspeisung.
+
+Der aktuelle Hauptdemonstrator ist `pandapower.networks.example_simple()`.
+Dieses Netz enthaelt 110-kV- und 20-kV-Ebenen, einen Slack, einen
+Zweiwicklungs-Transformator mit 150 Grad Phasenverschiebung, Leitungen,
+Switches, eine Last, einen `gen`, einen `sgen` und einen Shunt.
+
+Fuer die Upstream-Kopplung ist festgelegt:
 
 ```text
-0.5 * ||r||^2
+Kopplungsbus:       "MV Bus 2"
+Ersetztes Element:  sgen "static generator"
+Referenzwerte:      P = 2.0 MW, Q = -0.5 MVAr
+Q/P-Verhaeltnis:    -0.25
+Modellierung:       wetterabhaengige P/Q-Injektion, kein spannungsregelnder PV-Bus
 ```
 
-verwendet.
+Ab Experiment 3 wird ausschliesslich `example_simple()` verwendet. Das
+statische `sgen` wird dort deaktiviert und durch JAX-kompatible Upstream-Modelle
+ersetzt, ohne den Power-Flow-Kern zu veraendern.
 
-### Methodische Fixpunkte
+## Experimente und Status
 
-Die folgenden Designentscheidungen sind im Projekt bewusst gesetzt:
+### Experiment 1: Forward-Validierung
 
-- interne Rechnung konsequent im **Per-Unit-System**,
-- elektrische Physik in **komplexer Form**,
-- freie Solverzustände **reell parametrisiert**,
-- Spannung in **rechteckiger Darstellung**: `V = Vr + j Vi`,
-- Solverzustand der Nicht-Slack-Busse als `[Vr | Vi]`,
-- stationärer Forward-Solve über **Newton-Raphson**,
-- Gradienten über den konvergierten Solver via **implizite Differenzierung** mit `jax.lax.custom_root`,
-- Trennung zwischen **statischer Topologie**, **differenzierbaren Parametern** und **freien Zuständen**.
+Experiment 1 validiert den stationaeren Forward-Solve gegen `pandapower`.
+Umgesetzt sind sowohl der urspruengliche 3-Bus-PoC als auch
+`example_simple()`.
 
----
+Fuer `example_simple()` gibt es zwei Modi:
 
-## Scope von V1
+- `scope_matched`: aktive `gen` werden zu `sgen(P, Q=0)` konvertiert; dieser
+  Modus ist der strikte Vergleich.
+- `original_pandapower`: `pandapower` nutzt den originalen PV-Bus-Generator;
+  dieser Modus ist nur Kontextvergleich.
 
-Die erste Version fokussiert auf einen bewusst klar abgegrenzten Kern.
+Alle dokumentierten Szenarien konvergieren. Im `scope_matched`-Modus liegen die
+Knotenspannungen sehr nah an `pandapower` (`max |dV|` etwa `6e-5 pu`,
+`max |dtheta|` etwa `0.0023 deg`). Ein bekannter systematischer Offset bleibt
+bei Trafofluessen, Trafoverlusten und Slack-Leistung, vermutlich wegen nicht
+vollstaendig identischer Trafo-Shift-/Verlustabbildung.
 
-### Unterstützt
+Wichtige Dateien:
 
-- beliebige Netze aus
-  - Bussen,
-  - verlustbehafteten Leitungen im **Pi-Ersatzschaltbild**,
-  - bekannten Knotenleistungen,
-- **einen Slack-Bus**,
-- **PQ-Busse**,
-- stationäre AC-Physik,
-- Per-Unit-Rechnung,
-- JAX-kompatible Datenstrukturen,
-- differentiierbare Parameter und Zustände.
+- `experiments/exp01_validate_example_simple.py`
+- `experiments/plot_exp01_validation_figures.py`
+- `experiments/results/exp01_example_simple_validation/`
 
-### Explizit nicht Teil von V1
+### Experiment 2: Gradientenvalidierung
 
-- Transformatoren,
-- PV-Bus-Gleichungen,
-- große Benchmark-Netze,
-- industrielle Vollständigkeit,
-- harte Echtzeitanwendungen,
-- nichtglatte oder diskrete Regellogiken.
+Experiment 2 validiert implizite AD-Gradienten gegen zentrale Finite
+Differences. Fuer `example_simple()` werden 48 Gradienten untersucht:
 
----
+```text
+3 Szenarien x 4 Eingangsparameter x 4 Observables
+```
 
-## Demonstrator
+Alle 48 Gradienten sind gueltig; die absoluten AD-vs-FD-Fehler liegen im
+Bereich von etwa `1e-9`, mit einem dokumentierten Maximum von etwa `4.7e-9`.
+Groessere relative Fehler treten vor allem bei sehr kleinen
+Shunt-Sensitivitaeten auf und sind wegen kleiner absoluter Fehler numerisch
+unkritisch.
 
-Als Proof of Concept dient ein kleines **3-Bus-Verteilnetz**:
+Wichtige Dateien:
 
-- **Bus 0**: Slack / Umspannwerk / Anbindung ans übergeordnete Netz
-- **Bus 1**: Wohngebiet / Last
-- **Bus 2**: PV-Park
+- `experiments/exp02_validate_gradients_example_simple.py`
+- `experiments/plot_exp02_gradient_figures.py`
+- `experiments/results/exp02_example_simple_gradients/`
 
-Das grundlegende Demonstrationsnarrativ lautet:
+### Experiment 3: Cross-Domain PV Weather Sensitivity
 
-Ein Wohngebiet wird lokal durch einen PV-Park versorgt und zusätzlich über ein Umspannwerk an das übergeordnete Netz angebunden. Ein vorgelagertes differentiierbares PV-Modell erzeugt aus Wettergrößen wie Einstrahlung und Temperatur eine Einspeiseleistung, die anschließend in den differentiierbaren Netzrechenkern eingeht.
+Experiment 3 koppelt das `example_simple()`-Netz mit einem analytischen
+PV-Wettermodell:
 
-Typische Ausgänge des Netzkerns sind:
+```text
+g_poa_wm2, t_amb_c, wind_ms
+    -> cell_temperature_noct_sam(...)
+    -> pv_pq_injection_from_weather(...)
+    -> P_pv, Q_pv am Bus "MV Bus 2"
+    -> NetworkParams
+    -> AC-Power-Flow
+    -> elektrische Observables
+```
 
-- Netzbezug am Slack-Bus (`P_grid`),
-- Spannungsbeträge `|V|`,
-- Spannungswinkel,
-- Netzverluste,
-- Leitungsflüsse,
-- Residuum / Residual-Loss.
+Der aktuelle Lauf umfasst nach Erweiterung um einen Einstrahlungs-Sweep
+108 Forward-Solves und 1296 Sensitivitaetszeilen. Ausgewertet werden unter
+anderem `vm_mv_bus_2_pu`, `p_slack_mw`, `total_p_loss_mw` und
+`p_trafo_hv_mw`. Ein kompakter AD-vs-FD-Spot-Check plausibilisiert die neue
+Wetterkette.
 
----
+Wichtige Dateien:
 
-## Softwarearchitektur
+- `src/diffpf/models/pv.py`
+- `experiments/exp03_cross_domain_pv_weather.py`
+- `experiments/plot_exp03_figures.py`
+- `experiments/results/exp03_cross_domain_pv_weather/`
 
-Eine zentrale Architekturentscheidung ist die **zweistufige Repräsentation**:
+### Experiment 4: Modulare Upstream-Kopplung
 
-- **nach außen**: menschenfreundliche, deklarative Eingabestrukturen,
-- **nach innen**: kompilierte, arraybasierte JAX-Repräsentation.
+Experiment 4 zeigt, dass verschiedene vorgelagerte Modelle ueber dieselbe
+P/Q-Schnittstelle an den unveraenderten Power-Flow-Kern gekoppelt werden
+koennen. Verglichen werden:
 
-Damit bleibt die Nutzerschnittstelle lesbar, während der numerische Kern JIT- und Autodiff-freundlich bleibt.
+- analytisches PV-Wettermodell,
+- kleines JAX-MLP als P-only-Surrogat mit festem `Q = -0.25 * P`,
+- direkte differenzierbare P/Q-Skalierungsbaseline.
 
-### Kernprinzipien
+Das MLP ist ein Distillation-Surrogat fuer den Modularitaetsnachweis, kein
+Messdaten-Prognosemodell.
 
-- `core/` enthält **nur** numerische Kernlogik,
-- `io/` und `parser/` kapseln Einlesen, Validierung und Mapping,
-- `compile/` überführt Eingabemodelle in JAX-taugliche interne Strukturen,
-- `solver/` kapselt Forward-Solve und implizite Differenzierung,
-- `validation/` enthält Referenzvergleiche und Finite-Difference-Checks,
-- `experiments/` bildet die wissenschaftlichen Experimente ab,
-- `tests/` sichert Kernlogik, Parser, Solver und Observables ab.
+Wichtige Dateien:
 
-### Projektstruktur
+- `src/diffpf/models/pq_surrogate.py`
+- `experiments/exp04_modular_upstream_nn_surrogate.py`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/`
+
+### Experiment 5
+
+Experiment 5 ist als einfache gradientenbasierte gekoppelte Optimierung geplant,
+aber im aktuellen Changelog noch nicht als abgeschlossen dokumentiert.
+
+## Repository-Struktur
 
 ```text
 src/diffpf/
-├── io/
-│   ├── reader.py
-│   └── parser.py
-├── core/
-│   ├── types.py
-│   ├── units.py
-│   ├── ybus.py
-│   ├── residuals.py
-│   └── observables.py
-├── compile/
-│   └── network.py
-├── solver/
-│   ├── newton.py
-│   └── implicit.py
-└── validation/
-    ├── finite_diff.py
-    ├── pandapower_ref.py
-    └── gradient_check.py
+  core/        Numerische Kernlogik: Typen, p.u., Y-Bus, Residuen, Observables
+  compile/     NetworkSpec -> CompiledTopology + NetworkParams
+  io/          JSON-Reader, Parser, pandapower-Adapter, Topologie-Helfer
+  solver/      Newton-Raphson und implizit differenzierbarer Solver
+  models/      PV-Modell und kleines P/Q-Surrogat
+  validation/  pandapower-Referenz, Finite Differences, Gradient-Checks
+  pipeline/    Platzhalter fuer End-to-End-Pipelines
+  viz/         Platzhalter fuer Visualisierungshelfer
 
-cases/
-experiments/
-tests/
+cases/         3-Bus-PoC als Python- und JSON-Fall
+experiments/   Reproduzierbare Experiment- und Plot-Skripte
+tests/         pytest-Suite fuer Kern, IO, Solver, Modelle und Artefakte
+docs/          Kontext-, Architektur-, Modellierungs- und Experimentdokumente
 ```
 
-### Wichtige interne Datentypen
+## Installation
 
-- `NetworkSpec`
-- `CompiledTopology`
-- `NetworkParams`
-- `PFState`
+Das Projekt nutzt ein `src/`-Layout und kann direkt aus dem Repository
+installiert werden.
 
-Dabei gilt:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
 
-- **Topologie** ist statisch,
-- **physikalische Parameter** sind differentiierbar,
-- **Zustände** sind solverseitig frei.
+Alternativ enthaelt `requirements.txt` eine manuelle Abhaengigkeitsliste fuer
+direkte Installationen:
 
----
+```powershell
+python -m pip install -r requirements.txt
+```
 
-## Aktueller Entwicklungsstand
+Die wichtigste Laufzeitbasis ist JAX auf CPU. `pandapower` wird fuer Import,
+Referenzvalidierung und Tests verwendet, aber nicht im numerischen Kern.
 
-Laut Projektstatus und Changelog sind bereits folgende Bausteine umgesetzt:
+## Quickstart
 
-### Numerischer Kern
+Minimaler 3-Bus-Solve:
 
-- JAX-kompatible Typen und Pytrees,
-- Per-Unit-Konvertierung,
-- `Y_bus`-Aufbau für Pi-Leitungen,
-- Residuenformulierung,
-- Residual-Loss,
-- Newton-Raphson-Solver,
-- implizite Differenzierung via `custom_root`,
-- solver-unabhängige Observables.
+```powershell
+@'
+from cases.three_bus_poc import solve_three_bus_case
 
-### Parser- und IO-Schicht
+result = solve_three_bus_case()
+print("residual_norm:", float(result["residual_norm"]))
+print("voltage_mag_pu:", result["voltage_mag_pu"])
+'@ | python -
+```
 
-- JSON-Loader,
-- semantische Netzvalidierung,
-- Mapping externer Bus-IDs auf interne Indizes,
-- Umrechnung physikalischer Größen in p.u.,
-- Aufbau von `CompiledTopology`, `NetworkParams` und Startzustand.
+Tests:
 
-### Validierung und Experimente
+```powershell
+python -m pytest -q
+```
 
-- Referenzvergleich gegen **pandapower**,
-- zentrale Finite Differences,
-- Gradient-Checks AD vs. FD,
-- wiederverwendbare Betriebspunkte `low_pv`, `medium_pv`, `high_pv`,
-- Tests für Parser, Newton-Solver, impliziten Solver, Observables und Validierung.
+Ausgewaehlte Experimente:
 
----
+```powershell
+python experiments/exp01_validate_example_simple.py
+python experiments/exp02_validate_gradients_example_simple.py
+python experiments/exp03_cross_domain_pv_weather.py
+python experiments/exp04_modular_upstream_nn_surrogate.py
+```
 
-## Wissenschaftliche Evaluation
+Plot-Artefakte aus vorhandenen Ergebnisdateien:
 
-Die geplante Evaluation folgt einer gestuften Logik: Jede stärkere Aussage baut auf einer vorher abgesicherten Grundlage auf.
+```powershell
+python experiments/plot_exp01_validation_figures.py
+python experiments/plot_exp02_gradient_figures.py
+python experiments/plot_exp03_figures.py
+```
 
-### Experiment 1 – Solver-Validierung
+## Ergebnisartefakte
 
-Nachweis, dass der JAX-Kern für repräsentative Betriebspunkte dieselben elektrischen Ergebnisse liefert wie ein Referenzsolver.
+Die Experimente schreiben reproduzierbare CSV-/JSON-Artefakte unter
+`experiments/results/`. Die wichtigsten Ergebnisordner sind:
 
-### Experiment 2 – Gradientenvalidierung
+- `exp01_example_simple_validation/`
+- `exp02_example_simple_gradients/`
+- `exp03_cross_domain_pv_weather/`
+- `exp04_modular_upstream_nn_surrogate/`
 
-Vergleich von Automatic Differentiation / impliziter Differenzierung mit zentralen Finite Differences, um die lokale Konsistenz der berechneten Sensitivitäten zu prüfen.
+Die Plot-Skripte lesen vorhandene Artefakte und erzeugen Abbildungen, ohne neue
+Power-Flow-Solves oder neue Gradientenlaeufe zu starten.
 
-### Experiment 3 – Cross-Domain-Sensitivitätsanalyse
+## Bekannte Grenzen
 
-Demonstration, dass netzseitige Zielgrößen bis in vorgelagerte nicht-elektrische Eingangsgrößen zurückdifferenziert werden können.
+Die Validierung ist lokal und demonstratorbezogen. Sie ist kein mathematischer
+Beweis fuer beliebige Netze oder Betriebspunkte.
 
-### Experiment 4 – Modularität der Modellkopplung
+Wichtige dokumentierte Grenzen:
 
-Nachweis, dass derselbe PF-Kern mit unterschiedlichen vorgelagerten Modellen gekoppelt werden kann, ohne den Kern selbst anzupassen.
+- keine vollstaendige `pandapower`-Kompatibilitaet,
+- keine Controller- oder Schutzlogik,
+- keine Generator-Q-Limits,
+- keine PV-PQ-Umschaltung,
+- keine vollstaendige spannungsregelnde `pandapower.gen`-Semantik im
+  scope-matched Validierungspfad,
+- statische Topologie im JAX-Kern,
+- keine Differentiation diskreter Schalt- oder Aktiv/Inaktiv-Entscheidungen,
+- verbleibender Trafo-Offset im `example_simple()`-Vergleich,
+- kein Nachweis fuer industrielle Groessennetze oder Echtzeitfaehigkeit.
 
-### Experiment 5 – Gekoppelte Optimierung
+Diese Grenzen blockieren die dokumentierte PV-Upstream-Kopplung nicht, weil sie
+bewusst als glatte P/Q-Einspeisung an einem PQ-Bus modelliert wird.
 
-Demonstration einfacher gradientenbasierter Optimierungsaufgaben über die gesamte Modellkette hinweg.
+## Dokumentation
 
----
+Weitere Details liegen in `docs/`:
 
-## Bereits erreichte Ergebnisse
+- `docs/context/project_context.md`: Projektziel, Scope und Demonstrator
+- `docs/context/software_context.md`: Softwarearchitektur und Schichten
+- `docs/context/modeling_assumptions.md`: Modellannahmen und Vorzeichen
+- `docs/context/validation_status.md`: Validierungsstand
+- `docs/context/known_limitations.md`: Grenzen und Future Work
+- `docs/context/experiment_plan.md`: Experimentstrategie
+- `docs/pandapower_io_pipeline.md`: pandapower-Importpipeline
+- `docs/pandapower_example_simple_preparation.md`: Mapping von `example_simple()`
+- `CHANGELOG.md`: chronologischer Entwicklungsstand
 
-Nach aktuellem Changelog sind insbesondere folgende Punkte bereits realisiert:
+## Status in einem Satz
 
-- **Experiment 1**: Validierung gegen `pandapower` für das 3-Bus-PoC-Netz; laut Status stimmen die Ergebnisse innerhalb numerischen Rundungsrauschens überein.
-- **Experiment 2**: lokale Validierung impliziter Gradienten gegen zentrale Finite Differences.
-- Implementierte Ergebnisartefakte für die Gradientenvalidierung, u. a. Tabellen zu Fehlern und Schrittweitenstudien.
-
-Diese Ergebnisse stützen bereits zwei zentrale Aussagen des Projekts:
-
-1. der Kern rechnet elektrisch konsistent,
-2. die abgeleiteten lokalen Sensitivitäten sind numerisch überprüfbar.
-
----
-
-## Designregeln für die Weiterentwicklung
-
-Für weitere Arbeit am Projekt gelten einige bewusst strenge Regeln:
-
-- keine stillen Änderungen an Residuenformulierung oder Koordinatenwahl,
-- kein `numpy` im Hot Path – dort ausschließlich `jax.numpy`,
-- keine Python-`if`-Abfragen auf Tracer-Werten in `core/`, `solver/` oder `pipeline/`,
-- keine globalen Zustände im numerischen Kern,
-- differentiierbare Parameter gehören in `NetworkParams`, nicht in versteckte Closures,
-- `pandapower` bleibt Referenz und darf nicht in den Kern importiert werden,
-- neue Abstraktionen erst **nach** Wiederverwendung vorhandener Typen und Funktionen,
-- neue Kernfunktionen nur zusammen mit Tests.
-
----
-
-## Grenzen
-
-Die Aussagen dieses Projekts sind bewusst **lokal und demonstratorbasiert**.
-
-Die Validierung ist **kein** allgemeiner mathematischer Beweis für beliebige Netze oder Betriebspunkte. Sie ist auch **kein** Nachweis für Skalierbarkeit auf große reale Systeme, nicht für diskrete Regellogiken und nicht für allgemeine betriebliche Echtzeitanwendungen.
-
----
-
-## Anschlussfähigkeit
-
-Das Projekt ist als Grundlage für weiterführende Arbeiten gedacht, zum Beispiel für:
-
-- größere Netze,
-- Zeitreihen- und Multi-Betriebspunkt-Analysen,
-- mehrere gekoppelte Domänenmodelle,
-- modellübergreifende Optimierung,
-- datengetriebene Ersatzmodelle,
-- Einbettung von Netzphysik in lernbasierte Verfahren.
-
----
-
-## Hinweise zum Repository-Setup
-
-Dieser README-Entwurf basiert auf dem inhaltlichen Projektkontext und dem dokumentierten Softwarestand. Da in den vorliegenden Unterlagen **keine verifizierten Installations- oder CLI-Kommandos** enthalten sind, wurden bewusst **keine erfundenen Setup-Befehle** aufgenommen.
-
-Sobald im Repository z. B. eine `pyproject.toml`, `requirements.txt`, `Makefile` oder konkrete Einstiegsskripte vorliegen, sollten folgende Abschnitte ergänzt werden:
-
-- **Installation**
-- **Quickstart / Minimal Example**
-- **Tests ausführen**
-- **Experimente reproduzieren**
-
----
-
-## Status
-
-**Projektphase:** Proof of Concept / wissenschaftlicher Demonstrator  
-**Fokus:** Differentiable Physics für stationären AC-Power-Flow in JAX  
-**Aktuell umgesetzt:** Kernsolver, Parser, Referenzvalidierung, implizite Gradientenvalidierung  
-**Nächste fachliche Schritte:** Cross-Domain-Sensitivitäten, Modularitätsnachweis, gekoppelte Optimierung
-
+Der aktuelle Stand umfasst einen JAX-basierten, implizit differenzierbaren
+stationaeren AC-Power-Flow-Kern, eine kontrollierte `pandapower`-I/O-Pipeline,
+validierte Forward- und Gradientenergebnisse auf `example_simple()` sowie
+umgesetzte Cross-Domain- und Modularitaetsexperimente mit PV-Upstream-Modellen.
