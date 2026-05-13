@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-05-13 - Experiment 5a Netzscreening fuer PV-Curtailment-Vorbereitung
+
+### Neue Dateien
+- `experiments/exp05a_network_screening.py` - reduziertes Forward-Screening
+  auf `pandapower.networks.example_simple()` im scope-matched Modell. Das
+  `sgen "static generator"` am Bus `"MV Bus 2"` wird durch das bestehende
+  JAX-kompatible PV-Wettermodell ersetzt. Es werden 48 PV-Screeningfaelle und
+  4 no-PV-Referenzfaelle geloest, demonstratorinterne Stressindikatoren
+  berechnet, die Top-20-Faelle selektiert und nur fuer diese Top-20 lokale
+  AD-Sensitivitaeten nach `curtailment_factor` berechnet.
+- `tests/test_exp05a_network_screening_outputs.py` - leichte Schema-,
+  Scoring- und Exporttests fuer die neuen Experimentartefakte.
+
+### Neue Artefakte
+- `experiments/results/exp05a_network_screening/screening_results.csv/json`
+- `experiments/results/exp05a_network_screening/top_critical_cases.csv/json`
+- `experiments/results/exp05a_network_screening/sensitivity_top20.csv/json`
+- `experiments/results/exp05a_network_screening/branch_flows.csv/json`
+- `experiments/results/exp05a_network_screening/run_summary.csv/json`
+- `experiments/results/exp05a_network_screening/metadata.json`
+- `experiments/results/exp05a_network_screening/README.md`
+
+### Ergebnisumfang
+- Forward-Faelle: 52 = 48 Screeningfaelle + 4 no-PV-Referenzen.
+- Konvergenz: 52/52 Forward-Faelle konvergiert.
+- Top-Cases: 20.
+- Sensitivitaetszeilen: 160 = 20 Top-Cases x 8 Observables.
+- AD-Sensitivitaeten: 0 fehlgeschlagene Zeilen im erzeugten Artefakt.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp05a_network_screening_outputs.py -q`
+  (13 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp05a_network_screening.py`
+
+### Grenzen
+- Keine PV-Curtailment-Optimierung; nur Screening und lokale Sensitivitaeten.
+- Kritikalitaetsflags sind demonstratorinterne Stressindikatoren, keine
+  normativen Netzcode- oder Betriebsmittelgrenzverletzungen.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  neue PV-Bus-Regelung.
+- Leitungsfluesse werden nur als Scheinleistungs-Proxies exportiert; es werden
+  keine Leitungsauslastungen in Prozent behauptet.
+- Keine Aenderungen an `core/`, `solver/`, `compile/`, Y-Bus, Residuen oder
+  physikalischer Solverformulierung.
+
 ## 2026-05-07 - Experiment 3 Einstrahlungs-Sweep ergaenzt
 
 ### Geaenderte Dateien
