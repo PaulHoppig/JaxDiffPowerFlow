@@ -20,6 +20,14 @@ def test_module_is_importable(exp_module):
     assert exp_module is not None
 
 
+def test_default_training_config_uses_full_exp04_dataset_sizes(exp_module):
+    config = exp_module.SurrogateTrainingConfig()
+
+    assert config.train_samples == 8192
+    assert config.val_samples == 2048
+    assert config.eval_samples == 2048
+
+
 def test_required_artifact_names_are_defined(exp_module):
     required = set(exp_module.REQUIRED_ARTIFACTS)
 
@@ -96,6 +104,7 @@ def test_mini_training_run_is_possible(exp_module):
         seed=7,
         train_samples=12,
         val_samples=8,
+        eval_samples=6,
         hidden_width=4,
         hidden_layers=1,
         learning_rate=0.02,
@@ -103,11 +112,12 @@ def test_mini_training_run_is_possible(exp_module):
         log_every=1,
     )
 
-    params, train_x, val_x, history = exp_module.train_surrogate(config)
+    params, train_x, val_x, eval_x, history = exp_module.train_surrogate(config)
 
     assert exp_module.count_mlp_parameters(params) < 500
     assert train_x.shape == (12, 3)
     assert val_x.shape == (8, 3)
+    assert eval_x.shape == (6, 3)
     assert len(history) >= 2
     assert all(row.train_mse >= 0.0 for row in history)
 
@@ -212,6 +222,9 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
     summary_rows = [
         exp_module.RunSummaryRow(
             model_name="analytic_pv_weather",
+            train_points=config.train_samples,
+            val_points=config.val_samples,
+            eval_points=config.eval_samples,
             convergence_rate=1.0,
             max_residual_norm=1e-11,
             max_iterations=5,

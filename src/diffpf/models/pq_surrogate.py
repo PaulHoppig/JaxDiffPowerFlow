@@ -16,6 +16,10 @@ import jax.numpy as jnp
 
 from diffpf.models.pv import PV_BASE_P_MW, PV_Q_OVER_P, PVInjection
 
+DEFAULT_TRAIN_SAMPLES = 8192
+DEFAULT_VAL_SAMPLES = 2048
+DEFAULT_EVAL_SAMPLES = 2048
+
 
 class MLPParams(NamedTuple):
     """Weights and biases of a fully connected MLP."""
@@ -32,11 +36,12 @@ class WeatherInputNormalization(NamedTuple):
 
 
 class SurrogateTrainingConfig(NamedTuple):
-    """Small default training configuration for the Exp. 4 distillation run."""
+    """Default training configuration for the Exp. 4 distillation run."""
 
     seed: int = 42
-    train_samples: int = 512
-    val_samples: int = 128
+    train_samples: int = DEFAULT_TRAIN_SAMPLES
+    val_samples: int = DEFAULT_VAL_SAMPLES
+    eval_samples: int = DEFAULT_EVAL_SAMPLES
     hidden_width: int = 8
     hidden_layers: int = 2
     learning_rate: float = 0.03

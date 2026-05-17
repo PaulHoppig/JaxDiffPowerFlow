@@ -44,8 +44,14 @@ als weitere Schnittstellenkontrolle, nicht als fachlich genaues PV-Modell.
 
 Das Hauptmodell ist ein P-only-MLP mit drei Eingaben, zwei versteckten Schichten
 der Breite 8, `tanh`-Aktivierungen und einer skalaren Ausgabe. Die Default-
-Konfiguration verwendet 512 Trainings- und 128 Validierungspunkte, einen festen
-Seed und einfaches Full-Batch-Gradient-Descent in JAX.
+Konfiguration des Hauptlaufs verwendet 8192 Trainingspunkte, 2048
+Validierungspunkte und einen separaten 2048-Punkte-Evaluationssplit, einen
+festen Seed und einfaches Full-Batch-Gradient-Descent in JAX.
+
+Kleine Smoke-Test-Konfigurationen in den Tests duerfen weiterhin deutlich
+weniger Punkte verwenden. Diese Mini-Konfigurationen pruefen nur Import,
+Trainingsmechanik und Exportschema; sie ersetzen nicht den dokumentierten
+Exp.-4-Hauptlauf.
 
 Der synthetische Trainingsdatensatz wird durch Distillation des analytischen
 PV-Wettermodells erzeugt. Die Trainingsbereiche sind:
@@ -63,6 +69,12 @@ w_norm = (wind_ms - 5.25) / 4.75
 ```
 
 Die Zielgroesse fuer das Training ist `P_ref_mw / 2.0`.
+
+Der grosse `eval`-Split dient der statistischen Surrogatfehler-Auswertung. Die
+kleine feste Liste repraesentativer Wetterfaelle bleibt separat erhalten und
+wird fuer Power-Flow-Modellvergleich, AD-vs-FD-Spotchecks und
+Sensitivitaetsmuster genutzt. Dadurch wird nicht versehentlich ein
+2048-Punkte-Power-Flow-Vergleich ueber alle Modelle und Netzszenarien gestartet.
 
 ## Bewertungsartefakte
 

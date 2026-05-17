@@ -1,5 +1,86 @@
 # Changelog
 
+## 2026-05-17 - Experiment 4 grosses NN-Surrogat-Distillationstraining
+
+### Kurzbeschreibung
+- Experiment 4 wurde auf die robuste Hauptlauf-Konfiguration fuer das
+  JAX-only NN-PV-Surrogat umgestellt.
+- Die Default-Konfiguration verwendet nun `8192` Trainingspunkte, `2048`
+  Validierungspunkte und einen separaten `2048`-Punkte-Evaluationssplit.
+- Die Wetterbereiche bleiben unveraendert: `g_poa_wm2 = 0..1200 W/m^2`,
+  `t_amb_c = -10..45 degC`, `wind_ms = 0.5..10 m/s`.
+- Die Input-Normalisierung bleibt unveraendert:
+  `(G - 600) / 600`, `(T_amb - 17.5) / 27.5`,
+  `(wind - 5.25) / 4.75`.
+- Das Trainingsziel bleibt die analytische PV-Wettermodell-Distillation
+  `P_ref_mw / 2.0`. Das NN bleibt P-only; `Q = -0.25 * P` bleibt
+  deterministisch gekoppelt.
+- Der grosse Eval-Split dient nur der Surrogatfehler-Auswertung. Die kleine
+  feste Wetterfallliste fuer Power-Flow-Vergleich, AD-vs-FD-Spotchecks und
+  Sensitivitaetsmuster bleibt bewusst kompakt.
+
+### Geaenderte Dateien
+- `src/diffpf/models/pq_surrogate.py` - Default-Datensatzgroessen auf
+  `8192/2048/2048` gesetzt und `eval_samples` in
+  `SurrogateTrainingConfig` ergaenzt.
+- `src/diffpf/models/__init__.py` - neue Default-Groessenkonstanten exportiert.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` - separater
+  Eval-Split, Artefaktexport, Metadata, README und Run-Summary auf die neue
+  Hauptlauf-Konfiguration erweitert.
+- `tests/test_exp04_modular_surrogate_outputs.py` - Tests fuer die neue
+  Default-Konfiguration und die kleine Smoke-Test-Konfiguration angepasst.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - Hauptlauf-Konfiguration
+  und Trennung zwischen Eval-Split und kompakten Power-Flow-Vergleichsfaellen
+  dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+
+### Ergebnisnotizen
+- `training_dataset_summary.csv` dokumentiert `train=8192`, `val=2048`,
+  `eval=2048`.
+- `surrogate_error_table.csv` enthaelt `12288` Zeilen fuer Train-, Val- und
+  Eval-Split zusammen.
+- Der kompakte Power-Flow-Modellvergleich bleibt bei `18` Loesungen pro
+  Upstream-Modell; alle drei Modelle konvergieren mit `18/18`.
+- Finale Trainingshistorie: `val_mae_mw` ca. `0.0666 MW`.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp04_modular_upstream_nn_surrogate.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (9 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pq_surrogate_model.py -q`
+  (7 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pv_model.py -q`
+  (16 passed)
+- Optional ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (27 passed)
+
+### Bekannte Einschraenkungen
+- Das NN bleibt ein synthetisches Distillation-Surrogat, kein Messdaten- oder
+  allgemeines PV-Prognosemodell.
+- P-only-MLP: Blindleistung wird nicht gelernt, sondern bleibt fest
+  `Q = -0.25 * P`.
+- Keine Aenderung am AC-Power-Flow-Kern, PV-Modell, Solver, Residuen, Y-Bus,
+  impliziter Differentiation, Observables oder pandapower-Adapter.
+- Keine PV-Bus-Spannungsregelung, keine Q-Limits, keine PV-PQ-Umschaltung und
+  keine Controllerlogik.
+
 ## 2026-05-17 - Experiment 3 Sensitivitaets-Heatmaps im G-T-Gitter
 
 ### Kurzbeschreibung

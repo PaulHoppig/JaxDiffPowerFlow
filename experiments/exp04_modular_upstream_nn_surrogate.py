@@ -41,6 +41,9 @@ from diffpf.core.residuals import calc_power_injection, state_to_voltage
 from diffpf.core.types import NetworkParams, PFState
 from diffpf.core.ybus import build_ybus
 from diffpf.models.pq_surrogate import (
+    DEFAULT_EVAL_SAMPLES,
+    DEFAULT_TRAIN_SAMPLES,
+    DEFAULT_VAL_SAMPLES,
     DEFAULT_WEATHER_NORMALIZATION,
     MLPParams,
     SurrogateTrainingConfig,
@@ -240,6 +243,9 @@ class SensitivityPatternSummaryRow:
 @dataclass(frozen=True)
 class RunSummaryRow:
     model_name: str
+    train_points: int
+    val_points: int
+    eval_points: int
     convergence_rate: float
     max_residual_norm: float
     max_iterations: int
@@ -338,13 +344,14 @@ def _loss(params: MLPParams, norm: WeatherInputNormalization, x, y_norm) -> jnp.
 def train_surrogate(
     config: SurrogateTrainingConfig = SurrogateTrainingConfig(),
     norm: WeatherInputNormalization = DEFAULT_WEATHER_NORMALIZATION,
-) -> tuple[MLPParams, jnp.ndarray, jnp.ndarray, list[TrainingHistoryRow]]:
+) -> tuple[MLPParams, jnp.ndarray, jnp.ndarray, jnp.ndarray, list[TrainingHistoryRow]]:
     """Distill the analytical PV weather model into the small MLP."""
 
     key = jax.random.PRNGKey(config.seed)
-    key_params, key_train, key_val = jax.random.split(key, 3)
+    key_params, key_train, key_val, key_eval = jax.random.split(key, 4)
     train_x = make_weather_dataset(key_train, config.train_samples)
     val_x = make_weather_dataset(key_val, config.val_samples)
+    eval_x = make_weather_dataset(key_eval, config.eval_samples)
     train_y = _target_p_mw(train_x) / PV_BASE_P_MW
     val_y = _target_p_mw(val_x) / PV_BASE_P_MW
     params = init_mlp_params(
@@ -378,7 +385,7 @@ def train_surrogate(
             params,
             grads,
         )
-    return params, train_x, val_x, history
+    return params, train_x, val_x, eval_x, history
 
 
 def _direct_pq_baseline(g_poa_wm2, _t_amb_c, _wind_ms) -> PVInjection:
@@ -532,11 +539,11 @@ def build_surrogate_error_rows(
     norm: WeatherInputNormalization,
     train_x: jnp.ndarray,
     val_x: jnp.ndarray,
+    eval_x: jnp.ndarray,
 ) -> list[SurrogateErrorRow]:
     """Evaluate NN-vs-analytical PV error on train/val/eval cases."""
 
     rows: list[SurrogateErrorRow] = []
-    eval_x = _weather_array(list(WEATHER_CASES))
     splits = [("train", train_x), ("val", val_x), ("eval", eval_x)]
     for split, data in splits:
         p_ref = _target_p_mw(data)
@@ -620,6 +627,7 @@ def build_coupling_summary() -> list[CouplingSummaryRow]:
 def build_model_comparison(
     params: MLPParams,
     norm: WeatherInputNormalization,
+    config: SurrogateTrainingConfig,
 ) -> tuple[list[ModelComparisonRow], list[RunSummaryRow]]:
     scenarios = {
         name: build_scenario_base(name, load_factor)
@@ -667,6 +675,9 @@ def build_model_comparison(
         summary_rows.append(
             RunSummaryRow(
                 model_name=model_name,
+                train_points=config.train_samples,
+                val_points=config.val_samples,
+                eval_points=config.eval_samples,
                 convergence_rate=len(converged) / max(len(values), 1),
                 max_residual_norm=max(finite_residuals) if finite_residuals else float("nan"),
                 max_iterations=max((item[1] for item in converged), default=-1),
@@ -883,6 +894,41 @@ def write_metadata(
         "replaced_element": PV_COUPLING_SGEN_NAME,
         "upstream_models": list(UPSTREAM_MODELS),
         "training_config": config._asdict(),
+        "dataset_sizes": {
+            "train_points": config.train_samples,
+            "val_points": config.val_samples,
+            "eval_points": config.eval_samples,
+        },
+        "default_dataset_sizes": {
+            "train_points": DEFAULT_TRAIN_SAMPLES,
+            "val_points": DEFAULT_VAL_SAMPLES,
+            "eval_points": DEFAULT_EVAL_SAMPLES,
+        },
+        "weather_ranges": {
+            "g_poa_wm2": [0.0, 1200.0],
+            "t_amb_c": [-10.0, 45.0],
+            "wind_ms": [0.5, 10.0],
+        },
+        "dataset_seed_policy": {
+            "base_seed": config.seed,
+            "split_mechanism": "jax.random.split(seed, 4): params, train, val, eval",
+            "anchor_points_per_split": 6,
+        },
+        "training_method": "full-batch gradient descent in JAX",
+        "training_target": "P_ref_mw / 2.0 from analytical pv_pq_injection_from_weather",
+        "model_architecture": {
+            "input_names": ["g_poa_wm2", "t_amb_c", "wind_ms"],
+            "hidden_width": config.hidden_width,
+            "hidden_layers": config.hidden_layers,
+            "activation": "tanh",
+            "output": "normalized P_nn / 2.0",
+            "q_coupling": "Q = -0.25 * P",
+        },
+        "evaluation_split_note": (
+            "The eval split is a 2048-point synthetic surrogate-error dataset. "
+            "The compact WEATHER_CASES list is kept for power-flow, AD-vs-FD, "
+            "and sensitivity-pattern comparisons."
+        ),
         "normalization": {
             "center": [float(x) for x in DEFAULT_WEATHER_NORMALIZATION.center],
             "scale": [float(x) for x in DEFAULT_WEATHER_NORMALIZATION.scale],
@@ -912,6 +958,31 @@ surrogate, and a direct P/Q irradiance baseline.
 
 No Equinox, Flax, Optax, PyTorch, TensorFlow, controller logic, Q limits, or
 PV-to-PQ switching are used. The numerical power-flow core is unchanged.
+
+## Distillation dataset
+
+The default full Experiment 4 run trains the NN surrogate on 8192 synthetic
+weather points, validates on 2048 points, and evaluates surrogate error on a
+separate 2048-point eval split. The fixed weather ranges are:
+
+- `g_poa_wm2`: 0 to 1200 W/m^2
+- `t_amb_c`: -10 to 45 degC
+- `wind_ms`: 0.5 to 10 m/s
+
+The splits are generated reproducibly from the configured JAX seed using
+separate PRNG subkeys. Each split includes the same six anchor points and then
+independent random synthetic points. The training target is the analytical
+PV-weather teacher output `P_ref_mw / 2.0`; the NN remains a distillation
+surrogate, not a measured-data PV forecast model.
+
+The MLP has three inputs, two hidden layers of width 8 with `tanh`
+activations, and one scalar normalized active-power output. Reactive power is
+not learned: it remains deterministically coupled as `Q = -0.25 * P`.
+
+The compact weather-case list used for `model_comparison`,
+`gradient_success_table`, and `sensitivity_pattern_summary` remains separate
+from the 2048-point eval split. This keeps the power-flow and gradient
+comparisons intentionally small.
 
 ## Main artifacts
 
@@ -983,14 +1054,14 @@ def run_experiment(
     MLPParams,
 ]:
     norm = DEFAULT_WEATHER_NORMALIZATION
-    params, train_x, val_x, history_rows = train_surrogate(config, norm)
+    params, train_x, val_x, eval_x, history_rows = train_surrogate(config, norm)
     dataset_rows = [
         summarize_dataset("train", train_x),
         summarize_dataset("val", val_x),
-        summarize_dataset("eval", _weather_array(list(WEATHER_CASES))),
+        summarize_dataset("eval", eval_x),
     ]
-    error_rows = build_surrogate_error_rows(params, norm, train_x, val_x)
-    comparison_rows, summary_rows = build_model_comparison(params, norm)
+    error_rows = build_surrogate_error_rows(params, norm, train_x, val_x, eval_x)
+    comparison_rows, summary_rows = build_model_comparison(params, norm, config)
     coupling_rows = build_coupling_summary()
     gradient_rows = build_gradient_success_table(params, norm)
     pattern_rows = build_sensitivity_pattern_summary(params, norm)

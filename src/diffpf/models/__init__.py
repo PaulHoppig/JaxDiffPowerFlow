@@ -32,7 +32,10 @@ from .pv import (
     replace_pq_contribution_at_bus,
 )
 from .pq_surrogate import (
+    DEFAULT_EVAL_SAMPLES,
     DEFAULT_TRAINING_CONFIG,
+    DEFAULT_TRAIN_SAMPLES,
+    DEFAULT_VAL_SAMPLES,
     DEFAULT_WEATHER_NORMALIZATION,
     MLPParams,
     SurrogateTrainingConfig,
@@ -73,6 +76,9 @@ __all__ = [
     "pv_q_mvar_from_ratio",
     "replace_pq_contribution_at_bus",
     "DEFAULT_TRAINING_CONFIG",
+    "DEFAULT_TRAIN_SAMPLES",
+    "DEFAULT_VAL_SAMPLES",
+    "DEFAULT_EVAL_SAMPLES",
     "DEFAULT_WEATHER_NORMALIZATION",
     "MLPParams",
     "SurrogateTrainingConfig",
