@@ -78,6 +78,16 @@ GRADIENT_REQUIRED_COLUMNS = {
 }
 ERROR_SUMMARY_REQUIRED_COLUMNS = {"scenario"}
 FD_STEP_REQUIRED_COLUMNS = {"fd_step", "ad_grad", "fd_grad"}
+FD_VS_FD_REQUIRED_COLUMNS = {
+    "selected_gradient_id",
+    "scenario",
+    "input_parameter",
+    "output_observable",
+    "fd_step",
+    "fd_grad",
+    "fd_plus_converged",
+    "fd_minus_converged",
+}
 GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS = (
     "input_parameter",
     "output_observable",
@@ -90,6 +100,33 @@ GRADIENT_MAGNITUDE_ERROR_SUMMARY_COLUMNS = (
     "log10_median_abs_ad_grad",
     "log10_max_rel_error",
 )
+FD_VS_FD_STEP_STABILITY_COLUMNS = (
+    "selected_gradient_id",
+    "scenario",
+    "input_parameter",
+    "output_observable",
+    "fd_step_large",
+    "fd_step_small",
+    "fd_step_pair",
+    "fd_grad_large",
+    "fd_grad_small",
+    "fd_abs_change",
+    "fd_rel_change",
+    "fd_plus_converged_large",
+    "fd_minus_converged_large",
+    "fd_plus_converged_small",
+    "fd_minus_converged_small",
+    "ad_grad_large",
+    "ad_grad_small",
+    "ad_vs_fd_rel_error_large",
+    "ad_vs_fd_rel_error_small",
+)
+
+FD_STABILITY_LABELS = {
+    "base:load_scale_mv_bus_2->vm_mv_bus_2_pu": "load scale -> |V| MV Bus 2",
+    "base:sgen_scale_static_generator->p_slack_mw": "sgen scale -> P_slack",
+    "base:shunt_q_scale->total_p_loss_mw": "shunt Q scale -> total P loss",
+}
 
 
 def load_csv(path: Path) -> pd.DataFrame:
@@ -293,6 +330,90 @@ def write_gradient_magnitude_error_summary(
     json_path = output_dir / "gradient_magnitude_vs_error_summary.json"
     summary_df.to_csv(csv_path, index=False)
     summary_df.to_json(json_path, orient="records", indent=2)
+    return [csv_path, json_path]
+
+
+def compute_fd_vs_fd_step_stability(
+    fd_step_df: pd.DataFrame,
+    eps: float = 1e-12,
+) -> pd.DataFrame:
+    """Compare neighboring finite-difference gradients from an FD step study."""
+
+    require_columns(fd_step_df, FD_VS_FD_REQUIRED_COLUMNS, "fd_step_study.csv")
+    rel_col = next(
+        (
+            candidate
+            for candidate in ("rel_error", "relative_error")
+            if candidate in fd_step_df.columns
+        ),
+        None,
+    )
+
+    group_cols = [
+        "selected_gradient_id",
+        "scenario",
+        "input_parameter",
+        "output_observable",
+    ]
+    work = fd_step_df.copy()
+    work["fd_step"] = _numeric_series(work, "fd_step")
+    work["fd_grad"] = _numeric_series(work, "fd_grad")
+    if "ad_grad" in work.columns:
+        work["ad_grad"] = _numeric_series(work, "ad_grad")
+    if rel_col is not None:
+        work[rel_col] = _numeric_series(work, rel_col)
+    work = work.dropna(subset=group_cols + ["fd_step", "fd_grad"])
+
+    rows: list[dict] = []
+    for _, group in work.groupby(group_cols, sort=False):
+        group = group.sort_values("fd_step", ascending=False).reset_index(drop=True)
+        for idx in range(len(group) - 1):
+            large = group.iloc[idx]
+            small = group.iloc[idx + 1]
+            fd_grad_large = float(large["fd_grad"])
+            fd_grad_small = float(small["fd_grad"])
+            fd_abs_change = abs(fd_grad_small - fd_grad_large)
+            denominator = max(abs(fd_grad_small), abs(fd_grad_large), eps)
+
+            row = {
+                "selected_gradient_id": large["selected_gradient_id"],
+                "scenario": large["scenario"],
+                "input_parameter": large["input_parameter"],
+                "output_observable": large["output_observable"],
+                "fd_step_large": float(large["fd_step"]),
+                "fd_step_small": float(small["fd_step"]),
+                "fd_step_pair": f"{large['fd_step']:g} -> {small['fd_step']:g}",
+                "fd_grad_large": fd_grad_large,
+                "fd_grad_small": fd_grad_small,
+                "fd_abs_change": float(fd_abs_change),
+                "fd_rel_change": float(fd_abs_change / denominator),
+                "fd_plus_converged_large": large["fd_plus_converged"],
+                "fd_minus_converged_large": large["fd_minus_converged"],
+                "fd_plus_converged_small": small["fd_plus_converged"],
+                "fd_minus_converged_small": small["fd_minus_converged"],
+            }
+            if "ad_grad" in work.columns:
+                row["ad_grad_large"] = float(large["ad_grad"])
+                row["ad_grad_small"] = float(small["ad_grad"])
+            if rel_col is not None:
+                row["ad_vs_fd_rel_error_large"] = float(large[rel_col])
+                row["ad_vs_fd_rel_error_small"] = float(small[rel_col])
+            rows.append(row)
+
+    return pd.DataFrame(rows, columns=FD_VS_FD_STEP_STABILITY_COLUMNS)
+
+
+def write_fd_vs_fd_step_stability(
+    stability_df: pd.DataFrame,
+    output_dir: Path,
+) -> list[Path]:
+    """Write the FD-vs-FD step-stability table as CSV and JSON."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "fd_vs_fd_step_stability.csv"
+    json_path = output_dir / "fd_vs_fd_step_stability.json"
+    stability_df.to_csv(csv_path, index=False)
+    stability_df.to_json(json_path, orient="records", indent=2)
     return [csv_path, json_path]
 
 
@@ -800,6 +921,77 @@ def plot_fd_step_study(
     return save_figure(fig, output_dir, "fig04_fd_step_study")
 
 
+def _fd_stability_label(group_id: str, row: pd.Series) -> str:
+    if group_id in FD_STABILITY_LABELS:
+        return FD_STABILITY_LABELS[group_id]
+    input_label = COMPARISON_INPUT_LABELS.get(
+        str(row["input_parameter"]),
+        prettify_label(str(row["input_parameter"])),
+    )
+    output_label = COMPARISON_OUTPUT_LABELS.get(
+        str(row["output_observable"]),
+        prettify_label(str(row["output_observable"])),
+    )
+    return f"{input_label} -> {output_label}"
+
+
+def build_fd_vs_fd_step_stability_figure(
+    stability_df: pd.DataFrame,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Build Figure 7 showing FD-gradient changes between neighboring steps."""
+
+    required = {
+        "selected_gradient_id",
+        "input_parameter",
+        "output_observable",
+        "fd_step_large",
+        "fd_step_small",
+        "fd_rel_change",
+    }
+    require_columns(stability_df, required, "fd_vs_fd_step_stability")
+
+    work = stability_df.copy()
+    work["fd_step_large"] = _numeric_series(work, "fd_step_large")
+    work["fd_step_small"] = _numeric_series(work, "fd_step_small")
+    work["fd_rel_change"] = _numeric_series(work, "fd_rel_change").abs()
+    work = work.dropna(subset=["selected_gradient_id", "fd_step_large", "fd_rel_change"])
+    if work.empty:
+        raise ValueError("No finite FD-vs-FD stability rows available for plotting.")
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    for group_id, group in work.groupby("selected_gradient_id", sort=False):
+        group = group.sort_values("fd_step_large")
+        y = np.maximum(group["fd_rel_change"].to_numpy(float), EPS_LOG)
+        label = _fd_stability_label(str(group_id), group.iloc[0])
+        ax.plot(
+            group["fd_step_large"],
+            y,
+            marker="o",
+            linewidth=1.5,
+            label=label,
+        )
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("FD-vs-FD stability over finite-difference step size")
+    ax.set_xlabel("Larger FD step h")
+    ax.set_ylabel("Relative change between FD(h) and FD(next smaller h)")
+    ax.legend(fontsize=8)
+    ax.grid(True, which="both", alpha=0.3)
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_fd_vs_fd_step_stability(
+    stability_df: pd.DataFrame,
+    output_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 7: FD-vs-FD step-stability diagnostic."""
+
+    fig, _ = build_fd_vs_fd_step_stability_figure(stability_df)
+    return save_figure(fig, output_dir, "fig07_fd_vs_fd_step_stability")
+
+
 def _scenario_error_summary(error_summary_df: pd.DataFrame) -> pd.DataFrame:
     max_col = find_column(
         error_summary_df,
@@ -864,8 +1056,8 @@ def write_figures_readme(
 
 These figures are generated only from existing Experiment 2b artifacts in
 `{results_dir.as_posix()}`. The plotting script does not run new power-flow
-solves, does not recompute AD gradients, and does not evaluate finite
-differences.
+solves, does not recompute AD gradients, and does not run new
+finite-difference evaluations.
 
 ## Figure 1
 
@@ -926,6 +1118,28 @@ finite-difference deviations because the observable changes measured by
 finite differences become very small. This is a descriptive interpretation of
 existing artifacts only. No new power-flow solves, AD gradients, or finite
 differences are run.
+
+## Figure 7
+
+Files: `fig07_fd_vs_fd_step_stability.png` and
+`fig07_fd_vs_fd_step_stability.pdf`. Data source: `fd_step_study.csv`.
+The companion files `fd_vs_fd_step_stability.csv` and
+`fd_vs_fd_step_stability.json` contain one row per neighboring
+finite-difference step-size pair and selected gradient.
+
+Figure 7 compares FD gradients against FD gradients from the next smaller
+step size, for example `FD(h)` against `FD(h/10)`. This is a diagnostic of
+the finite-difference reference itself. It does not replace the AD-vs-FD
+main comparison; instead, it checks whether the exported FD gradients form a
+stable plateau over a useful step-size range. Small `fd_rel_change` values
+indicate such a stable FD plateau. Strongly increasing `fd_rel_change` at
+small `h` indicates that cancellation, rounding, or solver-tolerance noise can
+dominate the finite-difference signal. The shunt-Q case is expected to be more
+sensitive at small step sizes because the corresponding gradient is very small.
+
+This Figure 7 analysis is a pure re-analysis of the existing
+`fd_step_study.csv` artifact. No new power-flow solves, AD gradients, or
+finite-difference runs are performed.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
@@ -941,6 +1155,7 @@ def generate_figures(
     target_dir = figures_dir if figures_dir is not None else results_dir / "figures"
     gradient_df, error_summary_df, fd_step_df = load_artifacts(results_dir)
     comparison_summary = build_gradient_magnitude_error_comparison_table(gradient_df)
+    fd_stability = compute_fd_vs_fd_step_stability(fd_step_df)
 
     outputs: list[Path] = []
     outputs.extend(plot_parity(gradient_df, target_dir))
@@ -956,6 +1171,8 @@ def generate_figures(
             target_dir,
         )
     )
+    outputs.extend(write_fd_vs_fd_step_stability(fd_stability, target_dir))
+    outputs.extend(plot_fd_vs_fd_step_stability(fd_stability, target_dir))
     outputs.append(write_figures_readme(target_dir, results_dir))
     return outputs
 

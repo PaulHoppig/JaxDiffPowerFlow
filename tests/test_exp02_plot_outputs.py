@@ -100,8 +100,17 @@ def _sample_fd_step_df() -> pd.DataFrame:
             "fd_grad": [-0.01000001, -0.01, 1.000001, 1.0],
             "abs_error": [1e-8, 0.0, 1e-6, 0.0],
             "rel_error": [1e-6, 0.0, 1e-6, 0.0],
+            "fd_plus_converged": [True, True, True, True],
+            "fd_minus_converged": [True, True, True, True],
         }
     )
+
+
+def _real_fd_step_df(plot_module) -> pd.DataFrame:
+    path = plot_module.RESULTS_DIR / "fd_step_study.csv"
+    if not path.exists():
+        pytest.skip("Exp. 2b fd_step_study.csv is not present locally.")
+    return plot_module.load_csv(path)
 
 
 def _sample_error_summary_df() -> pd.DataFrame:
@@ -121,6 +130,7 @@ def _sample_error_summary_df() -> pd.DataFrame:
 
 def test_plot_module_is_importable(plot_module):
     assert plot_module is not None
+    assert callable(plot_module.compute_fd_vs_fd_step_stability)
 
 
 def test_prettify_label_maps_known_names(plot_module):
@@ -254,6 +264,90 @@ def test_fd_step_study_plot_writes_files(plot_module, tmp_path: Path):
     assert pdf_path.stat().st_size > 0
 
 
+def test_fd_vs_fd_step_stability_computation_from_real_artifacts(plot_module):
+    stability = plot_module.compute_fd_vs_fd_step_stability(
+        _real_fd_step_df(plot_module)
+    )
+
+    required_columns = {
+        "selected_gradient_id",
+        "scenario",
+        "input_parameter",
+        "output_observable",
+        "fd_step_large",
+        "fd_step_small",
+        "fd_step_pair",
+        "fd_grad_large",
+        "fd_grad_small",
+        "fd_abs_change",
+        "fd_rel_change",
+        "fd_plus_converged_large",
+        "fd_minus_converged_large",
+        "fd_plus_converged_small",
+        "fd_minus_converged_small",
+    }
+
+    assert len(stability) == 12
+    assert required_columns <= set(stability.columns)
+    assert np.isfinite(stability["fd_rel_change"]).all()
+    assert (stability["fd_rel_change"] >= 0.0).all()
+    assert (stability["fd_step_large"] > stability["fd_step_small"]).all()
+
+
+def test_fd_vs_fd_step_stability_pair_counts_from_real_artifacts(plot_module):
+    stability = plot_module.compute_fd_vs_fd_step_stability(
+        _real_fd_step_df(plot_module)
+    )
+
+    counts = stability.groupby("selected_gradient_id").size()
+    assert len(counts) == 3
+    assert (counts == 4).all()
+
+
+def test_fd_vs_fd_step_stability_export_writes_files(plot_module, tmp_path: Path):
+    stability = plot_module.compute_fd_vs_fd_step_stability(_sample_fd_step_df())
+    outputs = plot_module.write_fd_vs_fd_step_stability(stability, tmp_path)
+
+    assert {path.name for path in outputs} == {
+        "fd_vs_fd_step_stability.csv",
+        "fd_vs_fd_step_stability.json",
+    }
+    for path in outputs:
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+
+def test_fd_vs_fd_step_stability_plot_writes_files(plot_module, tmp_path: Path):
+    stability = plot_module.compute_fd_vs_fd_step_stability(_sample_fd_step_df())
+    png_path, pdf_path = plot_module.plot_fd_vs_fd_step_stability(
+        stability,
+        tmp_path,
+    )
+
+    assert png_path.name == "fig07_fd_vs_fd_step_stability.png"
+    assert pdf_path.name == "fig07_fd_vs_fd_step_stability.pdf"
+    assert png_path.exists()
+    assert pdf_path.exists()
+    assert png_path.stat().st_size > 0
+    assert pdf_path.stat().st_size > 0
+
+
+def test_fd_vs_fd_step_stability_figure_has_report_labels(plot_module):
+    stability = plot_module.compute_fd_vs_fd_step_stability(_sample_fd_step_df())
+    fig, ax = plot_module.build_fd_vs_fd_step_stability_figure(stability)
+
+    try:
+        assert ax.get_title() == "FD-vs-FD stability over finite-difference step size"
+        assert ax.get_xlabel() == "Larger FD step h"
+        assert ax.get_ylabel() == (
+            "Relative change between FD(h) and FD(next smaller h)"
+        )
+        assert ax.get_xscale() == "log"
+        assert ax.get_yscale() == "log"
+    finally:
+        plot_module.plt.close(fig)
+
+
 def test_faceted_parity_plot_writes_files(plot_module, tmp_path: Path):
     png_path, pdf_path = plot_module.plot_parity(
         _sample_gradient_df(),
@@ -357,8 +451,12 @@ def test_generate_figures_from_real_artifacts_when_present(plot_module, tmp_path
         "fig05_error_by_scenario.pdf",
         "fig06_gradient_magnitude_vs_relative_error_heatmaps.png",
         "fig06_gradient_magnitude_vs_relative_error_heatmaps.pdf",
+        "fig07_fd_vs_fd_step_stability.png",
+        "fig07_fd_vs_fd_step_stability.pdf",
         "gradient_magnitude_vs_error_summary.csv",
         "gradient_magnitude_vs_error_summary.json",
+        "fd_vs_fd_step_stability.csv",
+        "fd_vs_fd_step_stability.json",
         "README.md",
     }
     assert expected <= output_names
@@ -383,6 +481,8 @@ def test_figures_readme_mentions_figure_6(plot_module, tmp_path: Path):
     text = path.read_text(encoding="utf-8")
 
     assert "Figure 6" in text
+    assert "Figure 7" in text
     assert "log10(median |AD gradient|)" in text
     assert "log10(max relative error)" in text
+    assert "fd_vs_fd_step_stability.csv" in text
     assert "No new power-flow solves" in text

@@ -1,5 +1,164 @@
 # Changelog
 
+## 2026-05-17 - Experiment 2 FD-vs-FD-Schrittweitenstabilitaet
+
+### Kurzbeschreibung
+- Die bestehende Exp.-2-Plot- und Auswertungspipeline wurde um eine
+  FD-vs-FD-Stabilitaetsdiagnose fuer die vorhandene FD-Schrittweitenstudie
+  ergaenzt.
+- Die neue Analyse vergleicht benachbarte FD-Gradientenpaare, z. B. `FD(h)`
+  gegen `FD(h/10)`, und bewertet damit die Stabilitaet der
+  Finite-Difference-Referenz selbst.
+- Dies ist eine reine Re-Analyse vorhandener Exp.-2-Artefakte. Es wurden keine
+  neuen Power-Flow-Solves, keine neuen AD-Gradienten und keine neuen
+  Finite-Difference-Laeufe gestartet.
+- Der numerische Kern bleibt unveraendert; keine Aenderungen an `core/`,
+  `solver/`, `compile/`, Residuen, Y-Bus oder pandapower-Adapter.
+
+### Geaenderte Dateien
+- `experiments/plot_exp02_gradient_figures.py` - neue Funktion
+  `compute_fd_vs_fd_step_stability(...)`, CSV/JSON-Export und Fig.-7-Plot
+  ergaenzt.
+- `tests/test_exp02_plot_outputs.py` - Tests fuer Funktion, Tabellenform,
+  Plausibilitaet, Exporte und Regression der bestehenden Figuren erweitert.
+- `experiments/results/exp02_example_simple_gradients/figures/README.md` -
+  Fig. 7 mit Zweck, Datenquelle, Interpretation und Grenzen dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Neue Artefakte
+- `experiments/results/exp02_example_simple_gradients/figures/fd_vs_fd_step_stability.csv`
+- `experiments/results/exp02_example_simple_gradients/figures/fd_vs_fd_step_stability.json`
+- `experiments/results/exp02_example_simple_gradients/figures/fig07_fd_vs_fd_step_stability.png`
+- `experiments/results/exp02_example_simple_gradients/figures/fig07_fd_vs_fd_step_stability.pdf`
+
+### Ergebnisnotizen
+- Die FD-vs-FD-Tabelle enthaelt 12 Zeilen: 3 ausgewaehlte Gradienten mit je 4
+  benachbarten Schrittweitenpaaren.
+- `load_scale_mv_bus_2 -> vm_mv_bus_2_pu` zeigt ein stabiles FD-Plateau im
+  mittleren Schrittweitenbereich; das kleinste Paar bleibt im Bereich weniger
+  `1e-9` relativer FD-Aenderung.
+- `sgen_scale_static_generator -> p_slack_mw` bleibt ueber mittlere
+  Schrittweiten sehr stabil und zeigt erst beim kleinsten Paar eine hoehere,
+  aber weiterhin kleine relative FD-Aenderung.
+- `shunt_q_scale -> total_p_loss_mw` zeigt die erwartete staerkere
+  Instabilitaet bei kleinen Schrittweiten: `fd_rel_change` steigt bis auf ca.
+  `4.1e-3` fuer `1e-05 -> 1e-06`.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp02_gradient_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp02_plot_outputs.py`
+  (24 passed)
+
+### Bekannte Einschraenkungen
+- FD-vs-FD ist eine Zusatzdiagnose und ersetzt nicht den bestehenden
+  AD-vs-FD-Hauptvergleich.
+- Die Diagnose nutzt ausschliesslich die drei bereits ausgewaehlten Gradienten
+  der vorhandenen `fd_step_study.csv`; sie ist keine vollstaendige neue
+  Gradientenvalidierung.
+- Alle bekannten Modellgrenzen von Exp. 2 bleiben bestehen, insbesondere
+  scope-matched `gen -> sgen(P, Q=0)`, keine Q-Limits, keine
+  PV-PQ-Umschaltung und keine Controllerlogik.
+
+## 2026-05-16 - Experiment 1 Transformer-Magnetisierungsablation
+
+### Kurzbeschreibung
+- Neuer diagnostischer Ablationstest fuer Experiment 1 ergaenzt. Der Test
+  prueft, ob der systematische ca. 14-kW-Wirkleistungsoffset im
+  `scope_matched`-Vergleich von `pandapower.networks.example_simple()` durch
+  Trafo-Magnetisierung bzw. Eisenverluste erklaert wird.
+- Dafuer werden alle sieben Exp.-1-Szenarien einmal im bisherigen
+  `baseline`-Scope und einmal mit `pfe_kw = 0.0` sowie
+  `i0_percent = 0.0` am Trafo `110kV/20kV transformer` gerechnet.
+- Der numerische Kern bleibt unveraendert; Y-Bus, Residuen, Solver,
+  Trafo-Stempelung und Observables wurden nicht geaendert.
+
+### Neue Dateien
+- `experiments/exp01_transformer_magnetization_ablation.py` - direkt
+  ausfuehrbares Diagnose-Skript mit Variantenbildung, Summary,
+  Hypothesencheck, Artefaktexport und optionaler Balkengrafik.
+- `tests/test_exp01_transformer_magnetization_ablation.py` - Tests fuer
+  Trafo-Finder, Ablationsfunktion, Summary-Logik, Hypothesencheck und Export.
+
+### Neue Artefakte
+- `experiments/results/exp01_transformer_magnetization_ablation/ablation_results.csv/json`
+- `experiments/results/exp01_transformer_magnetization_ablation/ablation_summary.csv/json`
+- `experiments/results/exp01_transformer_magnetization_ablation/hypothesis_check.json`
+- `experiments/results/exp01_transformer_magnetization_ablation/metadata.json`
+- `experiments/results/exp01_transformer_magnetization_ablation/README.md`
+- `experiments/results/exp01_transformer_magnetization_ablation/figures/fig01_p_offset_baseline_vs_ablation.png/pdf`
+
+### Ergebnisnotizen
+- Baseline mean `p_slack_mw_abs_diff`: `14.364137 kW`.
+- Ablated mean `p_slack_mw_abs_diff`: `0.004896 kW`.
+- Baseline mean `total_p_loss_mw_abs_diff`: `14.364137 kW`.
+- Ablated mean `total_p_loss_mw_abs_diff`: `0.004896 kW`.
+- Baseline mean `trafo_pl_mw_abs_diff`: `14.374564 kW`.
+- Ablated mean `trafo_pl_mw_abs_diff`: `0.004170 kW`.
+- Reduktionsfaktoren: `p_slack = 2933.70`,
+  `total_p_loss = 2933.77`, `trafo_pl = 3447.22`.
+- Die Hypothese wird durch den Ablationstest unterstuetzt.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp01_transformer_magnetization_ablation.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_transformer_magnetization_ablation.py -q`
+  (9 passed)
+
+### Bekannte Einschraenkungen
+- Reine Diagnose; keine Korrektur der Trafo-Stempelung und keine
+  vollstaendige pandapower-Kompatibilitaet.
+- Der Test isoliert nur die Wirkung von `pfe_kw` und `i0_percent`.
+- Keine Aenderungen an `core/`, `solver/`, `compile/`, Y-Bus oder Residuen.
+
+## 2026-05-14 - Experiment 5 Plot-Pipeline aus vorhandenen Artefakten
+
+### Kurzbeschreibung
+- Neue Plot-Pipeline fuer Experiment 5 ergaenzt. Das Skript erzeugt vier
+  berichtstaugliche Abbildungen ausschliesslich aus bestehenden CSV-Artefakten
+  von Exp. 5a und Exp. 5b.
+- Es werden keine neuen Power-Flow-Solves, keine Sensitivitaeten, keine
+  Grid-Search und keine Curtailment-Optimierung gestartet.
+
+### Neue Dateien
+- `experiments/plot_exp05_figures.py` - liest vorhandene Exp.-5-Artefakte,
+  validiert die benoetigten Spalten und erzeugt PNG/PDF-Figuren.
+- `tests/test_exp05_plot_outputs.py` - isolierte Tests fuer Spaltenvalidierung,
+  Grid-Bestimmung und Figurenerzeugung mit Dummy-Artefakten.
+
+### Neue Artefakte
+- `experiments/results/exp05_figures/fig51_screening_export_overview.png/pdf`
+- `experiments/results/exp05_figures/fig53_export_before_after_reference.png/pdf`
+- `experiments/results/exp05_figures/fig54_grid_reference_export_vs_curtailment.png/pdf`
+- `experiments/results/exp05_figures/fig55_optimization_trace_export_and_curtailment.png/pdf`
+- `experiments/results/exp05_figures/README.md`
+- `experiments/results/exp05_figures/figure_metadata.json`
+
+### Datenquellen
+- `experiments/results/exp05a_network_screening/screening_results.csv`
+- `experiments/results/exp05a_network_screening/selected_realistic_case.csv`
+- `experiments/results/exp05b_optimize_pv_curtailment/selected_case_baseline.csv`
+- `experiments/results/exp05b_optimize_pv_curtailment/final_solution.csv`
+- `experiments/results/exp05b_optimize_pv_curtailment/grid_reference.csv`
+- `experiments/results/exp05b_optimize_pv_curtailment/optimization_trace.csv`
+- `experiments/results/exp05b_optimize_pv_curtailment/constraint_diagnostics.csv`
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp05_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp05_plot_outputs.py -q`
+  (5 passed)
+
+### Bekannte Einschraenkungen
+- Reine Reporting-Ergaenzung; keine methodische Aenderung am Modell.
+- Die 7.0-MW-Linie bleibt ein demonstratorinterner Zielwert, keine normative
+  Netzcode-Grenze.
+- Keine thermische Betriebsmittelbewertung; alle Einschraenkungen aus Exp. 5a
+  und Exp. 5b bleiben bestehen.
+
 ## 2026-05-13 - Experiment 5a Auswahlfall und Experiment 5b PV-Curtailment
 
 ### Kurzbeschreibung
