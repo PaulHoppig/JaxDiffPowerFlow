@@ -20,6 +20,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 
 RESULTS_DIR = (
@@ -56,6 +57,15 @@ SENSITIVITY_REQUIRED_COLUMNS = {
     "input_parameter",
     "input_unit",
     "value",
+}
+
+SENSITIVITY_HEATMAP_REQUIRED_COLUMNS = {
+    "network_scenario",
+    "weather_case_type",
+    "g_poa_wm2",
+    "t_amb_c",
+    "observable",
+    "input_parameter",
 }
 
 
@@ -304,6 +314,223 @@ def pivot_grid_2d_base_p_slack(
     return g_values, t_values, matrix
 
 
+def _as_dataframe(data: pd.DataFrame | Iterable[dict]) -> pd.DataFrame:
+    if isinstance(data, pd.DataFrame):
+        return data.copy()
+    return pd.DataFrame(list(data))
+
+
+def _sensitivity_value_column(df: pd.DataFrame) -> str:
+    for candidate in ("value", "sensitivity", "gradient", "ad_sensitivity"):
+        if candidate in df.columns:
+            return candidate
+    raise ValueError(
+        "sensitivity_table.csv must contain a sensitivity value column; "
+        "expected one of: value, sensitivity, gradient, ad_sensitivity."
+    )
+
+
+def prepare_sensitivity_heatmap_grid(
+    sensitivity_df: pd.DataFrame | Iterable[dict],
+    input_parameter: str,
+    network_scenario: str = "base",
+    observable: str = "p_slack_mw",
+) -> pd.DataFrame:
+    """Filter and pivot grid_2d sensitivity rows to a T_amb x G_poa grid."""
+
+    df = _as_dataframe(sensitivity_df)
+    value_col = _sensitivity_value_column(df)
+    required = SENSITIVITY_HEATMAP_REQUIRED_COLUMNS | {value_col}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"sensitivity_table.csv is missing required columns: {missing}")
+
+    work = df.copy()
+    for column in ("g_poa_wm2", "t_amb_c", value_col):
+        work[column] = pd.to_numeric(work[column], errors="coerce")
+
+    selected = work[
+        (work["weather_case_type"] == "grid_2d")
+        & (work["network_scenario"] == network_scenario)
+        & (work["observable"] == observable)
+        & (work["input_parameter"] == input_parameter)
+    ].dropna(subset=["g_poa_wm2", "t_amb_c", value_col])
+    if selected.empty:
+        raise ValueError(
+            "No sensitivity rows found for heatmap: "
+            f"network_scenario={network_scenario!r}, observable={observable!r}, "
+            f"input_parameter={input_parameter!r}."
+        )
+
+    try:
+        grid = selected.pivot(
+            index="t_amb_c",
+            columns="g_poa_wm2",
+            values=value_col,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Duplicate sensitivity rows found for the requested G x T heatmap."
+        ) from exc
+
+    grid = grid.sort_index(axis=0).sort_index(axis=1)
+    if grid.empty or grid.isna().any().any():
+        raise ValueError(
+            "Incomplete sensitivity heatmap grid after pivoting; "
+            "check missing g_poa_wm2/t_amb_c combinations."
+        )
+    return grid
+
+
+def sensitivity_heatmap_plot_grid(
+    raw_grid: pd.DataFrame,
+    input_parameter: str,
+) -> tuple[pd.DataFrame, str, str]:
+    """Convert raw MW/input-unit sensitivities to report units."""
+
+    if input_parameter == "g_poa_wm2":
+        return (
+            raw_grid.astype(float) * 1000.0 * 100.0,
+            r"dP_slack / dG [kW per 100 W/m$^2$]",
+            "kW per 100 W/m^2",
+        )
+    if input_parameter == "t_amb_c":
+        return (
+            raw_grid.astype(float) * 1000.0,
+            r"dP_slack / dT_amb [kW/$^\circ$C]",
+            "kW/degC",
+        )
+    raise ValueError(f"Unsupported sensitivity heatmap input_parameter: {input_parameter!r}")
+
+
+def plot_sensitivity_heatmap(
+    grid: pd.DataFrame,
+    title: str,
+    colorbar_label: str,
+    output_png: Path,
+    output_pdf: Path,
+) -> tuple[Path, Path]:
+    """Plot a discrete G x T sensitivity heatmap in the Fig. 2 style."""
+
+    g_values = [float(value) for value in grid.columns]
+    t_values = [float(value) for value in grid.index]
+    g_edges = _coordinate_edges(g_values)
+    t_edges = _coordinate_edges(t_values)
+
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.8))
+    mesh = ax.pcolormesh(
+        g_edges,
+        t_edges,
+        grid.to_numpy(dtype=float),
+        shading="flat",
+        edgecolors="white",
+        linewidth=0.55,
+    )
+    cbar = fig.colorbar(mesh, ax=ax)
+    cbar.set_label(colorbar_label)
+    ax.set_xticks(g_values)
+    ax.set_yticks(t_values)
+    ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
+    ax.set_title(title, fontsize=10)
+    fig.tight_layout(rect=(0.0, 0.02, 1.0, 1.0))
+    fig.savefig(output_png, dpi=200, bbox_inches="tight")
+    fig.savefig(output_pdf, bbox_inches="tight")
+    plt.close(fig)
+    return output_png, output_pdf
+
+
+def plot_fig06_heatmap_g_t_sensitivity_p_slack_wrt_g(
+    sensitivity_rows: list[dict],
+    figures_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 6: grid_2d d(P_slack)/d(G_poa) heatmap for the base scenario."""
+
+    raw_grid = prepare_sensitivity_heatmap_grid(sensitivity_rows, "g_poa_wm2")
+    plot_grid, colorbar_label, _ = sensitivity_heatmap_plot_grid(
+        raw_grid,
+        "g_poa_wm2",
+    )
+    stem = "fig06_heatmap_g_t_sensitivity_p_slack_wrt_g"
+    return plot_sensitivity_heatmap(
+        plot_grid,
+        "Slack-P sensitivity to irradiance over weather grid",
+        colorbar_label,
+        figures_dir / f"{stem}.png",
+        figures_dir / f"{stem}.pdf",
+    )
+
+
+def plot_fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb(
+    sensitivity_rows: list[dict],
+    figures_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 7: grid_2d d(P_slack)/d(T_amb) heatmap for the base scenario."""
+
+    raw_grid = prepare_sensitivity_heatmap_grid(sensitivity_rows, "t_amb_c")
+    plot_grid, colorbar_label, _ = sensitivity_heatmap_plot_grid(
+        raw_grid,
+        "t_amb_c",
+    )
+    stem = "fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb"
+    return plot_sensitivity_heatmap(
+        plot_grid,
+        "Slack-P sensitivity to ambient temperature over weather grid",
+        colorbar_label,
+        figures_dir / f"{stem}.png",
+        figures_dir / f"{stem}.pdf",
+    )
+
+
+def plot_fig08_heatmap_g_t_sensitivity_p_slack_combined(
+    sensitivity_rows: list[dict],
+    figures_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 8: side-by-side grid_2d Slack-P sensitivity heatmaps."""
+
+    raw_g = prepare_sensitivity_heatmap_grid(sensitivity_rows, "g_poa_wm2")
+    raw_t = prepare_sensitivity_heatmap_grid(sensitivity_rows, "t_amb_c")
+    grid_g, label_g, _ = sensitivity_heatmap_plot_grid(raw_g, "g_poa_wm2")
+    grid_t, label_t, _ = sensitivity_heatmap_plot_grid(raw_t, "t_amb_c")
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.8), constrained_layout=True)
+    panels = (
+        (axes[0], grid_g, "Irradiance sensitivity", label_g),
+        (axes[1], grid_t, "Ambient-temperature sensitivity", label_t),
+    )
+    for ax, grid, title, colorbar_label in panels:
+        g_values = [float(value) for value in grid.columns]
+        t_values = [float(value) for value in grid.index]
+        mesh = ax.pcolormesh(
+            _coordinate_edges(g_values),
+            _coordinate_edges(t_values),
+            grid.to_numpy(dtype=float),
+            shading="flat",
+            edgecolors="white",
+            linewidth=0.55,
+        )
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label(colorbar_label)
+        ax.set_xticks(g_values)
+        ax.set_yticks(t_values)
+        ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
+        ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
+        ax.set_title(title, fontsize=10)
+
+    fig.suptitle("Slack-P sensitivities over weather grid", fontsize=11)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    stem = "fig08_heatmap_g_t_sensitivity_p_slack_combined"
+    png_path = figures_dir / f"{stem}.png"
+    pdf_path = figures_dir / f"{stem}.pdf"
+    fig.savefig(png_path, dpi=200, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+    return png_path, pdf_path
+
+
 def plot_fig01_t_amb_sweep_p_slack(
     scenario_rows: list[dict],
     figures_dir: Path = FIGURES_DIR,
@@ -370,15 +597,6 @@ def plot_fig02_heatmap_g_t_p_slack_base(
     ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
     ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
     ax.set_title("Base scenario: Slack active power over weather grid", fontsize=10)
-    ax.text(
-        0.99,
-        1.02,
-        r"discrete 5$\times$5 weather grid",
-        transform=ax.transAxes,
-        ha="right",
-        va="bottom",
-        fontsize=8,
-    )
     ax.text(
         0.01,
         -0.20,
@@ -593,10 +811,42 @@ Lines compare the local AD sensitivity of slack active power to irradiance
 over the same sweep. The raw artifact stores sensitivities in MW/(W/m^2); the
 figure converts them to kW/(W/m^2) by multiplying `value` by 1000.
 
+## Figure 6
+
+Files: `fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.png` and
+`fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.pdf`. Data source:
+`sensitivity_table.csv`. Filter: `weather_case_type == "grid_2d"`,
+`network_scenario == "base"`, `observable == "p_slack_mw"`, and
+`input_parameter == "g_poa_wm2"`. Values are pivoted to a
+`t_amb_c x g_poa_wm2` matrix and displayed in the same discrete 5 x 5 style as
+Figure 2. The raw artifact stores sensitivities in MW/(W/m^2); the figure
+converts them to kW per 100 W/m^2 by multiplying `value` by 1000 x 100.
+
+This heatmap shows local derivatives, not global finite differences. Negative
+irradiance sensitivity means higher irradiance increases PV injection and makes
+`P_slack` more negative under the project's slack-power sign convention.
+
+## Figure 7
+
+Files: `fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.png` and
+`fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.pdf`. Data source:
+`sensitivity_table.csv`. Filter: `weather_case_type == "grid_2d"`,
+`network_scenario == "base"`, `observable == "p_slack_mw"`, and
+`input_parameter == "t_amb_c"`. Values are pivoted to a
+`t_amb_c x g_poa_wm2` matrix and displayed in the same discrete 5 x 5 style as
+Figure 2. The raw artifact stores sensitivities in MW/degC; the figure
+converts them to kW/degC by multiplying `value` by 1000.
+
+This heatmap also shows local derivatives. Positive temperature sensitivity
+means higher ambient temperature reduces PV active power and makes `P_slack`
+less negative.
+
 ## Limitations
 
 The figures are generated from existing Experiment 3 artifacts. Plotting does
-not change the PV model, the power-flow core, or solver logic.
+not run new power-flow solves, does not compute new AD sensitivities, does not
+run new finite-difference checks, and does not change the PV model, the
+power-flow core, or solver logic.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
@@ -618,6 +868,24 @@ def generate_figures(
     outputs.extend(plot_fig03_sensitivity_p_slack_vs_t_amb(sensitivity_rows, target_dir))
     outputs.extend(plot_g_sweep_p_slack(scenario_rows, target_dir))
     outputs.extend(plot_g_sweep_p_slack_sensitivity(sensitivity_rows, target_dir))
+    outputs.extend(
+        plot_fig06_heatmap_g_t_sensitivity_p_slack_wrt_g(
+            sensitivity_rows,
+            target_dir,
+        )
+    )
+    outputs.extend(
+        plot_fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb(
+            sensitivity_rows,
+            target_dir,
+        )
+    )
+    outputs.extend(
+        plot_fig08_heatmap_g_t_sensitivity_p_slack_combined(
+            sensitivity_rows,
+            target_dir,
+        )
+    )
     outputs.append(write_figures_readme(target_dir, results_dir))
     return outputs
 

@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-05-17 - Experiment 3 Sensitivitaets-Heatmaps im G-T-Gitter
+
+### Kurzbeschreibung
+- Die bestehende Exp.-3-Plot-Pipeline wurde um zwei diskrete
+  Sensitivitaets-Heatmaps fuer das vorhandene 2D-Wettergitter ergaenzt.
+- Neue Fig. 6 zeigt `G x T -> dP_slack/dg_poa_wm2` fuer das
+  `base`-Szenario und `p_slack_mw`.
+- Neue Fig. 7 zeigt `G x T -> dP_slack/dt_amb_c` fuer das
+  `base`-Szenario und `p_slack_mw`.
+- Dies ist eine reine Re-Visualisierung vorhandener Exp.-3-Artefakte aus
+  `sensitivity_table.csv`. Es wurden keine neuen Power-Flow-Solves, keine
+  neuen AD-Sensitivitaeten und keine neuen FD-Checks gestartet.
+- Das PV-Modell, der numerische Kern, Solver, Compile-Schicht, Residuen,
+  Y-Bus und pandapower-Adapter bleiben unveraendert.
+
+### Geaenderte Dateien
+- `experiments/plot_exp03_figures.py` - neue Pandas-basierte Pivot-Hilfen,
+  Einheitentransformationen und Fig.-6/Fig.-7-Heatmap-Exports ergaenzt.
+- `tests/test_exp03_plot_outputs.py` - Tests fuer Importierbarkeit,
+  Filter-/Pivot-Logik, Einheitentransformationen und neue Plot-Artefakte
+  erweitert.
+- `experiments/results/exp03_cross_domain_pv_weather/figures/README.md` -
+  Fig. 6 und Fig. 7 mit Datenquelle, Filtern, Einheiten und Interpretation
+  dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Neue Artefakte
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.png`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.pdf`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.png`
+- `experiments/results/exp03_cross_domain_pv_weather/figures/fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.pdf`
+
+### Ergebnisnotizen
+- `dP_slack/dG` wird in kW pro 100 W/m^2 dargestellt und ist im betrachteten
+  5x5-Gitter durchgehend negativ, ca. `-155` bis `-210` kW pro 100 W/m^2.
+- `dP_slack/dT_amb` wird in kW/degC dargestellt und ist im betrachteten
+  5x5-Gitter durchgehend positiv, ca. `1.6` bis `8.0` kW/degC.
+- Die Vorzeichen sind plausibel: mehr Einstrahlung erhoeht die PV-Einspeisung
+  und macht `P_slack` negativer; hoehere Umgebungstemperatur senkt die
+  PV-Leistung und macht `P_slack` weniger negativ.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp03_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp03_plot_outputs.py`
+  (19 passed)
+
+### Bekannte Einschraenkungen
+- Reine Re-Visualisierung vorhandener Sensitivitaetsdaten; keine neuen
+  numerischen Laeufe und keine neuen Szenarien.
+- Die Heatmaps zeigen lokale Ableitungen, keine globalen Differenzen ueber das
+  Wettergitter.
+- Keine Aenderung der physikalischen Vorzeichenkonvention.
+- Alle bekannten Exp.-3-Modellgrenzen bleiben bestehen: PQ-PV-Einspeisung,
+  keine PV-Bus-Regelung, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  Controllerlogik.
+
 ## 2026-05-17 - Experiment 2 FD-vs-FD-Schrittweitenstabilitaet
 
 ### Kurzbeschreibung

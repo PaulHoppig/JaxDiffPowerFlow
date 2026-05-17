@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 
@@ -16,6 +18,7 @@ def plot_module():
 
 def test_plot_module_is_importable(plot_module):
     assert plot_module is not None
+    assert callable(plot_module.prepare_sensitivity_heatmap_grid)
 
 
 def test_load_artifacts_reads_existing_csv_files(plot_module):
@@ -52,6 +55,56 @@ def test_grid_2d_pivot_has_expected_shape(plot_module):
     assert matrix.shape == (5, 5)
 
 
+def test_sensitivity_heatmap_grid_filters_and_pivots_g_gradient(plot_module):
+    _, sensitivity_rows = plot_module.load_artifacts()
+    grid = plot_module.prepare_sensitivity_heatmap_grid(
+        sensitivity_rows,
+        input_parameter="g_poa_wm2",
+    )
+
+    assert not grid.empty
+    assert grid.shape == (5, 5)
+    assert list(grid.index) == sorted(grid.index)
+    assert list(grid.columns) == sorted(grid.columns)
+    assert list(grid.columns) == [200.0, 400.0, 600.0, 800.0, 1000.0]
+    assert list(grid.index) == [5.0, 15.0, 25.0, 35.0, 45.0]
+    assert np.isfinite(grid.to_numpy(dtype=float)).all()
+
+    df = pd.DataFrame(sensitivity_rows)
+    expected = df[
+        (df["weather_case_type"] == "grid_2d")
+        & (df["network_scenario"] == "base")
+        & (df["observable"] == "p_slack_mw")
+        & (df["input_parameter"] == "g_poa_wm2")
+    ]
+    assert len(expected) == grid.size
+
+
+def test_sensitivity_heatmap_grid_filters_and_pivots_temperature_gradient(
+    plot_module,
+):
+    _, sensitivity_rows = plot_module.load_artifacts()
+    grid = plot_module.prepare_sensitivity_heatmap_grid(
+        sensitivity_rows,
+        input_parameter="t_amb_c",
+    )
+
+    assert not grid.empty
+    assert grid.shape == (5, 5)
+    assert list(grid.index) == sorted(grid.index)
+    assert list(grid.columns) == sorted(grid.columns)
+    assert np.isfinite(grid.to_numpy(dtype=float)).all()
+
+    df = pd.DataFrame(sensitivity_rows)
+    expected = df[
+        (df["weather_case_type"] == "grid_2d")
+        & (df["network_scenario"] == "base")
+        & (df["observable"] == "p_slack_mw")
+        & (df["input_parameter"] == "t_amb_c")
+    ]
+    assert len(expected) == grid.size
+
+
 def test_report_ticks_match_experiment_design(plot_module):
     assert plot_module.SWEEP_T_AMB_TICKS == (5, 15, 25, 35, 45, 55)
     assert plot_module.GRID_G_POA_TICKS == (200, 400, 600, 800, 1000)
@@ -84,6 +137,32 @@ def test_sensitivity_values_are_converted_to_kw_per_wm2(plot_module):
     rows = [{"value": "0.00012"}, {"value": "-0.0005"}]
 
     assert plot_module.sensitivity_values_kw_per_wm2(rows) == pytest.approx([0.12, -0.5])
+
+
+def test_sensitivity_heatmap_unit_transforms(plot_module):
+    raw_grid = pd.DataFrame(
+        [[-0.002, -0.001], [0.003, 0.004]],
+        index=[5.0, 15.0],
+        columns=[200.0, 400.0],
+    )
+
+    g_grid, g_label, g_unit = plot_module.sensitivity_heatmap_plot_grid(
+        raw_grid,
+        "g_poa_wm2",
+    )
+    t_grid, t_label, t_unit = plot_module.sensitivity_heatmap_plot_grid(
+        raw_grid,
+        "t_amb_c",
+    )
+
+    np.testing.assert_allclose(g_grid.to_numpy(), raw_grid.to_numpy() * 1000.0 * 100.0)
+    np.testing.assert_allclose(t_grid.to_numpy(), raw_grid.to_numpy() * 1000.0)
+    assert np.isfinite(g_grid.to_numpy(dtype=float)).all()
+    assert np.isfinite(t_grid.to_numpy(dtype=float)).all()
+    assert "kW per 100" in g_label
+    assert g_unit == "kW per 100 W/m^2"
+    assert "kW/" in t_label
+    assert t_unit == "kW/degC"
 
 
 def test_g_sweep_filter_returns_all_three_scenarios(plot_module):
@@ -140,6 +219,10 @@ def test_generate_figures_writes_expected_files(plot_module, tmp_path: Path):
         "fig04_g_sweep_p_slack.pdf",
         "fig05_sensitivity_p_slack_vs_g_poa.png",
         "fig05_sensitivity_p_slack_vs_g_poa.pdf",
+        "fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.png",
+        "fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.pdf",
+        "fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.png",
+        "fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.pdf",
         "README.md",
     }
     assert expected <= output_names
@@ -172,6 +255,27 @@ def test_g_sweep_sensitivity_plot_writes_files(plot_module, tmp_path: Path):
     assert "fig05_sensitivity_p_slack_vs_g_poa.png" in names
     assert "fig05_sensitivity_p_slack_vs_g_poa.pdf" in names
     for path in outputs:
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+
+def test_sensitivity_heatmap_plots_write_files(plot_module, tmp_path: Path):
+    _, sensitivity_rows = plot_module.load_artifacts()
+    fig06 = plot_module.plot_fig06_heatmap_g_t_sensitivity_p_slack_wrt_g(
+        sensitivity_rows,
+        tmp_path,
+    )
+    fig07 = plot_module.plot_fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb(
+        sensitivity_rows,
+        tmp_path,
+    )
+
+    names = {path.name for path in fig06 + fig07}
+    assert "fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.png" in names
+    assert "fig06_heatmap_g_t_sensitivity_p_slack_wrt_g.pdf" in names
+    assert "fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.png" in names
+    assert "fig07_heatmap_g_t_sensitivity_p_slack_wrt_t_amb.pdf" in names
+    for path in fig06 + fig07:
         assert path.exists()
         assert path.stat().st_size > 0
 
