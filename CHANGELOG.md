@@ -1,5 +1,70 @@
 # Changelog
 
+## 2026-05-17 - Experiment 4 Training-Loss-Visualisierung
+
+### Kurzbeschreibung
+- Eine neue reine Plot-Pipeline fuer Experiment 4 erzeugt berichtstaugliche
+  Trainingskurven aus dem vorhandenen Artefakt `training_history.csv`.
+- Fig. 1 visualisiert Train- und Validation-MSE ueber den aufgezeichneten
+  Trainingsschritten.
+- Da die Trainingshistorie MAE-Spalten enthaelt, erzeugt die Pipeline zusaetzlich
+  Fig. 2 fuer Train- und Validation-MAE in MW.
+- Dies ist eine reine Re-Visualisierung bestehender Exp.-4-Artefakte. Es wurde
+  kein neues NN-Training gestartet und es wurden keine neuen Power-Flow-Solves,
+  AD-Sensitivitaeten oder FD-Checks berechnet.
+
+### Neue/geaenderte Dateien
+- `experiments/plot_exp04_training_figures.py` - neues direkt ausfuehrbares
+  Matplotlib/Pandas-Plot-Skript fuer die Exp.-4-Trainingshistorie.
+- `tests/test_exp04_plot_outputs.py` - leichte Tests fuer Importierbarkeit,
+  Spaltenerkennung, Validierung, Plot-Export und Scope ohne Training oder
+  Power-Flow.
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/README.md` -
+  Datenquelle, Kurvenbedeutung, Log-Skalierung, finale Werte und Scope
+  dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Neue Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.png`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.png`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.pdf`
+
+### Datenquelle
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv`
+  mit den Spalten `step`, `train_mse`, `val_mse`, `train_mae_mw`,
+  `val_mae_mw` und `learning_rate`.
+
+### Ergebnisnotizen
+- Finale Train-MSE: ca. `0.001764`.
+- Finale Validation-MSE: ca. `0.001756`.
+- Finale Train-MAE: ca. `0.06648 MW`.
+- Finale Validation-MAE: ca. `0.06663 MW`.
+- MSE- und MAE-Figuren verwenden logarithmische y-Achsen, da alle geplotteten
+  Werte positiv sind.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp04_training_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp04_plot_outputs.py`
+  (13 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp04_modular_surrogate_outputs.py`
+  (9 passed)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pq_surrogate_model.py`
+  (7 passed)
+
+### Bekannte Einschraenkungen
+- Die Figuren bewerten nur die bereits exportierte Trainingshistorie; sie
+  starten kein Training neu und pruefen keine neuen Wetterpunkte.
+- Die Visualisierung ist deskriptiv und ersetzt keine erneute
+  Surrogatvalidierung, keinen Power-Flow-Modellvergleich und keine
+  AD-vs-FD-Pruefung.
+- Das NN bleibt das bestehende synthetische Distillation-Surrogat und kein
+  Messdaten- oder allgemeines PV-Prognosemodell.
+
 ## 2026-05-17 - Experiment 4 grosses NN-Surrogat-Distillationstraining
 
 ### Kurzbeschreibung
