@@ -1,5 +1,98 @@
 # Changelog
 
+## 2026-05-19 - Korrektur der Trafo-Magnetisierungsadmittanz im Pi-Stempel
+
+### Kurzbeschreibung
+- Die Transformator-Stempelung in `src/diffpf/core/ybus.py` wurde korrigiert.
+- Das Modell verwendet weiterhin ein Pi-Ersatzschaltbild; es wurde nicht auf
+  ein T-Ersatzschaltbild umgestellt.
+- Die aus `pfe_kw` und `i0_percent` abgeleitete Leerlaufadmittanz wird nun als
+  gesamte Magnetisierungsadmittanz `y_m = g_m - j*b_m` interpretiert und im
+  Pi-Modell als `y_m/2` auf HV- und `y_m/2` auf LV-Klemme verteilt.
+- Der HV-Selbstadmittanzterm nutzt nun `tap * conj(tap)`; die Off-Diagonalterme
+  verwenden die konjugierten komplexen Tap-Faktoren analog zur
+  `pandapower`-Pi-Referenz.
+- `b_mag_pu` bleibt intern eine positive induktive Magnitude; das Vorzeichen
+  wird erst im komplexen Y-Bus als `-j*b_mag_pu` gesetzt.
+
+### Geaenderte Dateien
+- `src/diffpf/core/ybus.py` - korrigierte Pi-Stempelung fuer
+  Trafo-Magnetisierung, Tap-/Shift-Konjugation und Dokumentation.
+- `src/diffpf/core/types.py` - Kommentar zur `b_mag_pu`-Vorzeichenkonvention
+  praezisiert.
+- `src/diffpf/io/pandapower_adapter.py` und `src/diffpf/io/parser.py` -
+  Kommentare zur Speicherung von `b_mag_pu` als positiver Magnitude ergaenzt.
+- `experiments/exp01_validate_example_simple.py` - Trafoflussauswertung,
+  Metadata und Ergebnis-README an die korrigierte Stempelung angepasst;
+  `p_slack_mw_abs_diff` in der Summary wird nun direkt aus der Slack-Tabelle
+  uebernommen.
+- `experiments/exp01_transformer_magnetization_ablation.py` - Interpretation
+  des Ablationstests aktualisiert, damit der fruehere Diagnosebefund vom
+  aktuellen korrigierten Hauptmodell getrennt wird.
+- `experiments/plot_exp01_validation_figures.py` - Figure-README an den
+  verschwundenen 14-kW-Offset angepasst.
+- `tests/test_trafo.py` - Unit-Tests fuer halbierte Magnetisierung,
+  reine Magnetisierung, positives `b_mag`-Vorzeichen und komplexe Tap-Terme
+  erweitert.
+- `docs/context/known_limitations.md` - Transformator-Paritaetsabschnitt auf
+  den korrigierten Stand gebracht.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp01_example_simple_validation/validation_summary.csv/json`
+- `experiments/results/exp01_example_simple_validation/bus_results.csv/json`
+- `experiments/results/exp01_example_simple_validation/slack_results.csv/json`
+- `experiments/results/exp01_example_simple_validation/line_flows.csv/json`
+- `experiments/results/exp01_example_simple_validation/trafo_flows.csv/json`
+- `experiments/results/exp01_example_simple_validation/losses.csv/json`
+- `experiments/results/exp01_example_simple_validation/structure_summary.csv/json`
+- `experiments/results/exp01_example_simple_validation/metadata.json`
+- `experiments/results/exp01_example_simple_validation/README.md`
+- `experiments/results/exp01_example_simple_validation/figures/*`
+- `experiments/results/exp01_transformer_magnetization_ablation/*`
+
+### Ergebnisnotizen
+- Alle sieben `scope_matched`-Szenarien in Experiment 1 konvergieren weiterhin.
+- Maximale Residualnorm der `scope_matched`-Szenarien: ca. `4.32e-11`.
+- Max `max_vm_pu_abs_diff`: `2.350559e-05 p.u.`.
+- Max `max_va_degree_abs_diff`: `2.527126e-04 deg`.
+- Max `p_slack_mw_abs_diff`: `5.776102e-06 MW` = `0.005776 kW`.
+- Mean `p_slack_mw_abs_diff`: `0.004602 kW`.
+- Max `total_p_loss_mw_abs_diff`: `5.775987e-06 MW` = `0.005776 kW`.
+- Mean `total_p_loss_mw_abs_diff`: `0.004602 kW`.
+- Max `trafo_pl_mw_abs_diff`: `4.700529e-06 MW` = `0.004701 kW`.
+- Mean `trafo_pl_mw_abs_diff`: `0.003871 kW`.
+- Der zuvor dokumentierte ca. `14.36 kW`-Wirkleistungsoffset ist damit im
+  aktuellen `scope_matched`-Hauptlauf verschwunden bzw. auf wenige Watt
+  reduziert.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_trafo.py -q`
+  (`12 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_example_simple_outputs.py -q`
+  (`34 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_ybus.py tests/test_json_trafo_shunt.py tests/test_pandapower_adapter.py -q`
+  (`38 passed, 1 xpassed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_transformer_magnetization_ablation.py -q`
+  (`9 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp01_validate_example_simple.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp01_validation_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp01_transformer_magnetization_ablation.py`
+
+### Bekannte Einschraenkungen
+- Weiterhin Pi-Ersatzschaltbild; keine T-Modell-Umstellung.
+- Keine Aenderung am Newton-Solver, Residuum oder an der impliziten
+  Differentiation.
+- Keine allgemeine Garantie vollstaendiger `pandapower`-Featureparitaet fuer
+  alle Transformatorfaelle, Tap-Seiten, Controller oder Q-Limit-Logiken.
+
 ## 2026-05-17 - Experiment 4 Training-Loss-Visualisierung
 
 ### Kurzbeschreibung

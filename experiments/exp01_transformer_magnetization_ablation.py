@@ -51,6 +51,7 @@ VARIANTS = (BASELINE_VARIANT, ABLATION_VARIANT)
 PFE_REFERENCE_MW = 0.014
 SUPPORT_ABS_THRESHOLD_MW = 1e-3
 SUPPORT_REDUCTION_FACTOR = 10.0
+CORRECTED_BASELINE_ABS_THRESHOLD_MW = 1e-3
 
 
 @dataclass(frozen=True)
@@ -313,16 +314,23 @@ def build_hypothesis_check(summary_df: pd.DataFrame) -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         "hypothesis": (
-            "The approximately 14 kW active-power offset in the Exp.-1 "
-            "scope_matched comparison is mainly caused by transformer "
-            "magnetization / iron losses in pandapower example_simple()."
+            "Historical diagnostic: the formerly observed approximately 14 kW "
+            "active-power offset in the Exp.-1 scope_matched comparison was "
+            "mainly caused by transformer magnetization / iron-loss handling "
+            "in pandapower example_simple()."
         ),
         "ablation": {"pfe_kw": 0.0, "i0_percent": 0.0},
         "reference_pfe_mw": PFE_REFERENCE_MW,
+        "current_core_note": (
+            "The main diffpf transformer pi stamp now splits the total "
+            "magnetizing admittance over both terminals. Therefore the current "
+            "baseline is expected to be small already; ablation no longer needs "
+            "to produce a dramatic collapse."
+        ),
         "support_rule": (
-            "Supported if each active-power mean offset drops by at least a "
-            f"factor of {SUPPORT_REDUCTION_FACTOR:g} or below "
-            f"{SUPPORT_ABS_THRESHOLD_MW:g} MW."
+            "Legacy diagnostic support is true if each active-power mean offset "
+            f"drops by at least a factor of {SUPPORT_REDUCTION_FACTOR:g} or "
+            f"below {SUPPORT_ABS_THRESHOLD_MW:g} MW after ablation."
         ),
     }
 
@@ -345,6 +353,14 @@ def build_hypothesis_check(summary_df: pd.DataFrame) -> dict[str, Any]:
         payload[f"{label}_supports_hypothesis"] = supported
 
     payload["supports_pfe_offset_hypothesis"] = bool(all(metric_support.values()))
+    payload["current_baseline_below_corrected_threshold"] = bool(
+        all(
+            _summary_value(summary_df, BASELINE_VARIANT, column)
+            < CORRECTED_BASELINE_ABS_THRESHOLD_MW
+            for column in metrics.values()
+        )
+    )
+    payload["corrected_baseline_threshold_mw"] = CORRECTED_BASELINE_ABS_THRESHOLD_MW
     return payload
 
 
@@ -405,7 +421,12 @@ def write_metadata(output_dir: Path, hypothesis_check: dict[str, Any]) -> None:
             "tolerance": exp01.NEWTON_OPTIONS.tolerance,
             "damping": exp01.NEWTON_OPTIONS.damping,
         },
-        "no_core_changes": True,
+        "core_uses_corrected_pi_magnetization_stamp": True,
+        "core_change_note": (
+            "The diagnostic itself does not alter the numerical core during the "
+            "run. The repository core may already include the corrected pi "
+            "magnetizing-admittance stamp."
+        ),
         "hypothesis_check": hypothesis_check,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -439,26 +460,34 @@ def write_readme(
         _summary_value(summary_df, ABLATION_VARIANT, "mean_trafo_pl_mw_abs_diff") * 1e3
     )
 
-    interpretation = (
-        "unterstuetzt"
-        if hypothesis_check["supports_pfe_offset_hypothesis"]
-        else "nicht unterstuetzt"
-    )
+    if hypothesis_check.get("current_baseline_below_corrected_threshold", False):
+        interpretation = (
+            "Die aktuelle Baseline liegt bereits unter "
+            f"{CORRECTED_BASELINE_ABS_THRESHOLD_MW * 1e3:.3f} kW. Der fruehere "
+            "14-kW-Befund ist damit im korrigierten Hauptmodell nicht mehr als "
+            "aktueller Offset vorhanden."
+        )
+    elif hypothesis_check["supports_pfe_offset_hypothesis"]:
+        interpretation = "Die historische Ablationshypothese wird weiterhin unterstuetzt."
+    else:
+        interpretation = "Die historische Ablationshypothese wird in diesem Lauf nicht unterstuetzt."
 
     text = f"""# Experiment 1 Diagnostic: Transformer Magnetization Ablation
 
 ## Ziel
 
-Dieser Diagnose-Lauf prueft, ob der systematische Wirkleistungsoffset im
-`scope_matched`-Vergleich von Experiment 1 hauptsaechlich durch die
-Magnetisierungs- bzw. Eisenverlustparameter des `example_simple()`-Trafos
-erklaert wird.
+Dieser Diagnose-Lauf prueft den frueheren systematischen Wirkleistungsoffset im
+`scope_matched`-Vergleich von Experiment 1. Nach der Korrektur der
+Trafo-Magnetisierungsstempelung im Hauptmodell dient der Lauf als Regression:
+Er trennt den historischen Diagnosebefund von der aktuellen korrigierten
+Pi-Stempelung.
 
 ## Hypothese
 
 Der Trafo `{TRAFO_NAME}` besitzt im Basismodell `pfe_kw = 14.0` und
-`i0_percent = 0.07`. Der beobachtete Offset von etwa 14 kW in Slackleistung,
-Gesamtwirkverlust und Trafowirkverlust liegt in derselben Groessenordnung.
+`i0_percent = 0.07`. Der frueher beobachtete Offset von etwa 14 kW in
+Slackleistung, Gesamtwirkverlust und Trafowirkverlust lag in derselben
+Groessenordnung.
 
 ## Varianten
 
@@ -470,8 +499,10 @@ diffpf-Konvertierung und vor dem pandapower-Referenzlauf beim Trafo
 `pfe_kw = 0.0` und `i0_percent = 0.0`.
 
 Es wird ausschliesslich `reference_mode = scope_matched` betrachtet. Der
-numerische Kern, die Trafo-Stempelung, Y-Bus, Residuen und Solver wurden nicht
-geaendert.
+aktuelle numerische Kern verwendet weiterhin ein Pi-Ersatzschaltbild, verteilt
+die gesamte Magnetisierungsadmittanz aber korrekt auf beide Klemmen. Residuen,
+Newton-Solver und implizite Differentiation werden durch diesen Diagnose-Lauf
+nicht veraendert.
 
 ## Zentrale Ergebnisse
 
@@ -483,10 +514,13 @@ geaendert.
 
 ## Interpretation
 
-Die Hypothese wird durch diesen Ablationstest **{interpretation}**.
-Das Kriterium ist erfuellt, wenn die mittleren Wirkleistungsoffsets im
-ablierten Fall mindestens um Faktor {SUPPORT_REDUCTION_FACTOR:g} sinken oder
-unter {SUPPORT_ABS_THRESHOLD_MW * 1e3:.3f} kW fallen.
+{interpretation}
+
+Das historische Ablationskriterium ist erfuellt, wenn die mittleren
+Wirkleistungsoffsets im ablierten Fall mindestens um Faktor
+{SUPPORT_REDUCTION_FACTOR:g} sinken oder unter
+{SUPPORT_ABS_THRESHOLD_MW * 1e3:.3f} kW fallen. Im korrigierten Hauptmodell ist
+jedoch vor allem relevant, ob bereits die Baseline klein bleibt.
 
 ## Artefakte
 
@@ -500,9 +534,8 @@ unter {SUPPORT_ABS_THRESHOLD_MW * 1e3:.3f} kW fallen.
 
 ## Einschraenkung
 
-Der Test isoliert nur die Wirkung von `pfe_kw` und `i0_percent`. Er korrigiert
-nicht die diffpf-Trafo-Stempelung und stellt keine vollstaendige
-pandapower-Kompatibilitaet her.
+Der Test isoliert nur die Wirkung von `pfe_kw` und `i0_percent`. Er ist kein
+Nachweis vollstaendiger pandapower-Kompatibilitaet fuer alle Trafofaelle.
 """
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "README.md").write_text(text, encoding="utf-8")

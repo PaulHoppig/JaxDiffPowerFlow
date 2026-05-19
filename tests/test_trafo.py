@@ -15,7 +15,14 @@ import numpy as np
 import pytest
 
 from diffpf.compile import compile_network
-from diffpf.core.types import BusSpec, LineSpec, NetworkSpec, TrafoSpec
+from diffpf.core.types import (
+    BusSpec,
+    CompiledTopology,
+    LineSpec,
+    NetworkParams,
+    NetworkSpec,
+    TrafoSpec,
+)
 from diffpf.core.ybus import build_ybus
 
 
@@ -49,6 +56,55 @@ def _two_bus_trafo_spec(r: float, x: float, tap: float = 1.0, shift: float = 0.0
         p_spec_pu=(0.0, -0.5),
         q_spec_pu=(0.0, -0.1),
     )
+
+
+def _two_bus_direct_trafo_params(
+    *,
+    g_series: float = 0.0,
+    b_series: float = 0.0,
+    g_mag: float = 0.0,
+    b_mag: float = 0.0,
+    tap: float = 1.0,
+    shift: float = 0.0,
+) -> tuple[CompiledTopology, NetworkParams]:
+    """Build a two-bus topology with raw trafo admittance arrays.
+
+    This helper bypasses ``compile_network`` so tests can isolate pure
+    magnetizing-admittance stamps without relaxing the compiler's non-zero
+    series-impedance validation for real transformer specs.
+    """
+
+    topology = CompiledTopology(
+        n_bus=2,
+        slack_bus=0,
+        from_bus=jnp.asarray([], dtype=jnp.int32),
+        to_bus=jnp.asarray([], dtype=jnp.int32),
+        variable_buses=jnp.asarray([1], dtype=jnp.int32),
+        is_pq_mask=jnp.asarray([True]),
+        is_pv_mask=jnp.asarray([False]),
+    )
+    params = NetworkParams(
+        p_spec_pu=jnp.asarray([0.0, 0.0], dtype=jnp.float64),
+        q_spec_pu=jnp.asarray([0.0, 0.0], dtype=jnp.float64),
+        v_set_pu=jnp.asarray([1.0], dtype=jnp.float64),
+        g_series_pu=jnp.asarray([], dtype=jnp.float64),
+        b_series_pu=jnp.asarray([], dtype=jnp.float64),
+        b_shunt_pu=jnp.asarray([], dtype=jnp.float64),
+        slack_vr_pu=jnp.asarray(1.0, dtype=jnp.float64),
+        slack_vi_pu=jnp.asarray(0.0, dtype=jnp.float64),
+        trafo_g_series_pu=jnp.asarray([g_series], dtype=jnp.float64),
+        trafo_b_series_pu=jnp.asarray([b_series], dtype=jnp.float64),
+        trafo_g_mag_pu=jnp.asarray([g_mag], dtype=jnp.float64),
+        trafo_b_mag_pu=jnp.asarray([b_mag], dtype=jnp.float64),
+        trafo_tap_ratio=jnp.asarray([tap], dtype=jnp.float64),
+        trafo_shift_rad=jnp.asarray([shift], dtype=jnp.float64),
+        trafo_hv_bus=(0,),
+        trafo_lv_bus=(1,),
+        shunt_g_pu=jnp.asarray([], dtype=jnp.float64),
+        shunt_b_pu=jnp.asarray([], dtype=jnp.float64),
+        shunt_bus=(),
+    )
+    return topology, params
 
 
 # ---------------------------------------------------------------------------
@@ -149,23 +205,116 @@ def test_empty_trafo_list_leaves_line_network_unchanged():
 
 def test_trafo_with_magnetising_admittance():
     """
-    With g_mag and b_mag, the HV diagonal gets an extra y_mag / |a|^2 contribution.
+    With total y_mag, both transformer terminals get half of the magnetizing
+    admittance. b_mag is stored as a positive inductive magnitude, so the
+    complex admittance is g_mag - j*b_mag.
     """
     r, x, t = 0.02, 0.04, 1.0
-    g_mag, b_mag = 0.001, -0.005
+    g_mag, b_mag = 0.001, 0.005
 
     spec = _two_bus_trafo_spec(r, x, tap=t, g_mag=g_mag, b_mag=b_mag)
     topology, params = compile_network(spec)
     y_bus = build_ybus(topology, params)
 
     y_series = 1.0 / complex(r, x)
-    y_mag_val = complex(g_mag, b_mag)
-    expected_hv_diag = (y_series + y_mag_val) / (t ** 2)
+    y_mag_half = 0.5 * complex(g_mag, -b_mag)
+    expected_hv_diag = y_series + y_mag_half
+    expected_lv_diag = y_series + y_mag_half
     np.testing.assert_allclose(
         complex(y_bus[0, 0]),
         expected_hv_diag,
         rtol=1e-10,
     )
+    np.testing.assert_allclose(
+        complex(y_bus[1, 1]),
+        expected_lv_diag,
+        rtol=1e-10,
+    )
+
+
+def test_trafo_magnetising_admittance_not_counted_twice():
+    """The sum of both pi shunts equals one total y_mag, not two."""
+    topology, params = _two_bus_direct_trafo_params(g_mag=0.014, b_mag=0.0105)
+    y_bus = build_ybus(topology, params)
+
+    expected_half = 0.5 * complex(0.014, -0.0105)
+    np.testing.assert_allclose(complex(y_bus[0, 0]), expected_half, rtol=1e-12)
+    np.testing.assert_allclose(complex(y_bus[1, 1]), expected_half, rtol=1e-12)
+    np.testing.assert_allclose(
+        complex(y_bus[0, 0] + y_bus[1, 1]),
+        complex(0.014, -0.0105),
+        rtol=1e-12,
+    )
+
+
+def test_pure_magnetising_admittance_consumes_real_power_once():
+    """At V=1 on both terminals, P consumption is g_mag once, not twice."""
+    topology, params = _two_bus_direct_trafo_params(g_mag=0.014, b_mag=0.0105)
+    y_bus = build_ybus(topology, params)
+    voltage = jnp.asarray([1.0 + 0.0j, 1.0 + 0.0j], dtype=jnp.complex128)
+    current = y_bus @ voltage
+    s_bus = voltage * jnp.conj(current)
+
+    np.testing.assert_allclose(float(jnp.real(jnp.sum(s_bus))), 0.014, rtol=1e-12)
+    np.testing.assert_allclose(float(jnp.imag(jnp.sum(s_bus))), 0.0105, rtol=1e-12)
+
+
+def test_trafo_zero_magnetising_admittance_keeps_series_stamp():
+    """With y_m=0, the corrected stamp is identical to the old series branch."""
+    r, x, tap, shift = 0.02, 0.04, 0.93, 0.4
+    spec = _two_bus_trafo_spec(r, x, tap=tap, shift=shift, g_mag=0.0, b_mag=0.0)
+    topology, params = compile_network(spec)
+    y_bus = build_ybus(topology, params)
+
+    y_series = 1.0 / complex(r, x)
+    t = tap * np.exp(1j * shift)
+    np.testing.assert_allclose(complex(y_bus[0, 0]), y_series / (t * np.conj(t)))
+    np.testing.assert_allclose(complex(y_bus[1, 1]), y_series)
+    np.testing.assert_allclose(complex(y_bus[0, 1]), -y_series / np.conj(t))
+    np.testing.assert_allclose(complex(y_bus[1, 0]), -y_series / t)
+
+
+def test_complex_tap_uses_abs_square_not_complex_square_for_hv_diagonal():
+    """For phase shift, HV self-admittance must use t*conj(t), not t**2."""
+    r, x, tap, shift = 0.02, 0.04, 0.95, 0.7
+    g_mag, b_mag = 0.003, 0.004
+    spec = _two_bus_trafo_spec(
+        r, x, tap=tap, shift=shift, g_mag=g_mag, b_mag=b_mag
+    )
+    topology, params = compile_network(spec)
+    y_bus = build_ybus(topology, params)
+
+    y_series = 1.0 / complex(r, x)
+    y_mag_half = 0.5 * complex(g_mag, -b_mag)
+    t = tap * np.exp(1j * shift)
+    expected = (y_series + y_mag_half) / (t * np.conj(t))
+    wrong_complex_square = (y_series + y_mag_half) / (t ** 2)
+
+    np.testing.assert_allclose(complex(y_bus[0, 0]), expected, rtol=1e-10)
+    assert abs(complex(y_bus[0, 0]) - wrong_complex_square) > 1e-3
+
+
+def test_complex_tap_off_diagonals_use_conjugated_factors():
+    """Off-diagonal stamps follow pandapower pi convention for complex taps."""
+    r, x, tap, shift = 0.02, 0.04, 0.95, 0.7
+    spec = _two_bus_trafo_spec(r, x, tap=tap, shift=shift)
+    topology, params = compile_network(spec)
+    y_bus = build_ybus(topology, params)
+
+    y_series = 1.0 / complex(r, x)
+    t = tap * np.exp(1j * shift)
+    np.testing.assert_allclose(complex(y_bus[0, 1]), -y_series / np.conj(t))
+    np.testing.assert_allclose(complex(y_bus[1, 0]), -y_series / t)
+    assert abs(complex(y_bus[0, 1]) - complex(y_bus[1, 0])) > 1e-3
+
+
+def test_positive_b_mag_is_inductive_pandapower_sign():
+    """Positive stored b_mag is stamped as negative imaginary admittance."""
+    topology, params = _two_bus_direct_trafo_params(g_mag=0.0, b_mag=0.0105)
+    y_bus = build_ybus(topology, params)
+
+    np.testing.assert_allclose(float(jnp.imag(y_bus[0, 0])), -0.00525, rtol=1e-12)
+    np.testing.assert_allclose(float(jnp.imag(y_bus[1, 1])), -0.00525, rtol=1e-12)
 
 
 def test_trafo_off_diagonal_symmetry_no_shift():

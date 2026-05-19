@@ -20,6 +20,7 @@ Aufruf
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import math
 import subprocess
@@ -395,24 +396,31 @@ def _trafo_flows_from_voltage(
         y_t = complex(
             float(params.trafo_g_series_pu[k]), float(params.trafo_b_series_pu[k])
         )
+        # params.trafo_b_mag_pu stores the positive no-load susceptance magnitude.
+        # pandapower's pi branch uses y_m = g_m - j*b_m and splits this total
+        # magnetizing admittance equally over both transformer terminals.
         y_m = complex(
-            float(params.trafo_g_mag_pu[k]), float(params.trafo_b_mag_pu[k])
+            float(params.trafo_g_mag_pu[k]), -float(params.trafo_b_mag_pu[k])
         )
+        y_m_hv = 0.5 * y_m
+        y_m_lv = 0.5 * y_m
         a = float(params.trafo_tap_ratio[k])
         phi = float(params.trafo_shift_rad[k])
         t = a * np.exp(1j * phi)
         t_conj = np.conj(t)
-        a2 = a * a
+        tap_abs_sq = t * t_conj
 
         # Y-bus contributions (same as in ybus.py):
-        # Y[hv,hv] = (y_t + y_m) / a²,  Y[hv,lv] = -y_t / conj(t)
-        # Y[lv,hv] = -y_t / t,           Y[lv,lv] = y_t + y_m
+        # Y[hv,hv] = (y_t + y_m/2) / (t*conj(t))
+        # Y[hv,lv] = -y_t / conj(t)
+        # Y[lv,hv] = -y_t / t
+        # Y[lv,lv] = y_t + y_m/2
         #
         # I_* = current consumed FROM bus * by the trafo (load convention).
         # S_* = V_* * conj(I_*) = complex power consumed from that bus.
         # pandapower p_hv_mw > 0 ↔ power flows from bus into trafo → Re(S_hv).
-        I_inj_hv = (y_t + y_m) / a2 * V_hv + (-y_t / t_conj) * V_lv
-        I_inj_lv = (-y_t / t) * V_hv + (y_t + y_m) * V_lv
+        I_inj_hv = (y_t + y_m_hv) / tap_abs_sq * V_hv + (-y_t / t_conj) * V_lv
+        I_inj_lv = (-y_t / t) * V_hv + (y_t + y_m_lv) * V_lv
 
         S_from_hv = V_hv * np.conj(I_inj_hv)
         S_from_lv = V_lv * np.conj(I_inj_lv)
@@ -816,6 +824,7 @@ def _build_summary_row(
     ref_mode: str,
     diffpf_sol: _DiffpfSolution,
     pp_sol: _PPSolution,
+    slack_row: SlackResultRow,
     bus_rows: list[BusResultRow],
     line_rows: list[LineFlowRow],
     trafo_rows: list[TrafoFlowRow],
@@ -844,11 +853,6 @@ def _build_summary_row(
     max_tp = max(tp_diffs) if tp_diffs else float("nan")
     max_tq = max(tq_diffs) if tq_diffs else float("nan")
 
-    # Slack from loss_row reference
-    slack_p_rows = [r for r in bus_rows if r.is_slack]
-    p_slack_diff = float("nan")
-    q_slack_diff = float("nan")
-
     return SummaryRow(
         scenario=scenario,
         reference_mode=ref_mode,
@@ -866,8 +870,8 @@ def _build_summary_row(
         max_line_q_mvar_abs_diff=max_lq,
         max_trafo_p_mw_abs_diff=max_tp,
         max_trafo_q_mvar_abs_diff=max_tq,
-        p_slack_mw_abs_diff=loss_row.total_p_loss_mw_abs_diff,
-        q_slack_mvar_abs_diff=loss_row.total_q_loss_mvar_abs_diff,
+        p_slack_mw_abs_diff=slack_row.p_slack_mw_abs_diff,
+        q_slack_mvar_abs_diff=slack_row.q_slack_mvar_abs_diff,
         total_p_loss_mw_abs_diff=loss_row.total_p_loss_mw_abs_diff,
         total_q_loss_mvar_abs_diff=loss_row.total_q_loss_mvar_abs_diff,
         notes=notes,
@@ -959,7 +963,7 @@ def run_scenario(
     )
     summary_row = _build_summary_row(
         scenario_name, ref_mode, diffpf_sol, pp_sol,
-        bus_rows, line_rows, trafo_rows, loss_row, notes,
+        slack_row, bus_rows, line_rows, trafo_rows, loss_row, notes,
     )
 
     return _ScenarioResult(
@@ -1055,6 +1059,14 @@ def write_metadata(results_dir: Path, scenarios: list[str]) -> None:
             "Required because example_simple has a 150 deg phase-shifting trafo "
             "that makes flat-start diverge."
         ),
+        "transformer_pi_stamp": {
+            "magnetizing_admittance": (
+                "pfe_kw/i0_percent are converted to total y_m = g_m - j*b_m. "
+                "The pi stamp splits y_m/2 at HV and y_m/2 at LV; the HV "
+                "self-admittance is transformed by tap*conj(tap)."
+            ),
+            "changed_on": "2026-05-19",
+        },
         "known_model_simplifications": [
             "gen is modelled as sgen(P, Q=0) – no voltage regulation",
             "no Q-limit enforcement for generators",
@@ -1070,6 +1082,62 @@ def write_metadata(results_dir: Path, scenarios: list[str]) -> None:
 
 
 def write_readme(results_dir: Path) -> None:
+    summary_path = results_dir / "validation_summary.csv"
+    trafo_path = results_dir / "trafo_flows.csv"
+    metrics = {
+        "max_vm_pu_abs_diff": float("nan"),
+        "max_va_degree_abs_diff": float("nan"),
+        "max_p_slack_kw_abs_diff": float("nan"),
+        "max_total_p_loss_kw_abs_diff": float("nan"),
+        "max_trafo_pl_kw_abs_diff": float("nan"),
+        "mean_p_slack_kw_abs_diff": float("nan"),
+        "mean_total_p_loss_kw_abs_diff": float("nan"),
+        "mean_trafo_pl_kw_abs_diff": float("nan"),
+        "all_scope_matched_converged": False,
+        "n_scope_matched": 0,
+    }
+    if summary_path.exists() and trafo_path.exists():
+        with summary_path.open(encoding="utf-8", newline="") as f:
+            rows = [
+                row for row in csv.DictReader(f)
+                if row.get("reference_mode") == "scope_matched"
+            ]
+        with trafo_path.open(encoding="utf-8", newline="") as f:
+            trafo_rows = [
+                row for row in csv.DictReader(f)
+                if row.get("reference_mode") == "scope_matched"
+            ]
+        if rows:
+            metrics["n_scope_matched"] = len(rows)
+            metrics["all_scope_matched_converged"] = all(
+                row.get("diffpf_converged") == "True"
+                and row.get("pandapower_converged") == "True"
+                for row in rows
+            )
+            metrics["max_vm_pu_abs_diff"] = max(
+                float(row["max_vm_pu_abs_diff"]) for row in rows
+            )
+            metrics["max_va_degree_abs_diff"] = max(
+                float(row["max_va_degree_abs_diff"]) for row in rows
+            )
+            p_slack = [float(row["p_slack_mw_abs_diff"]) for row in rows]
+            p_loss = [float(row["total_p_loss_mw_abs_diff"]) for row in rows]
+            metrics["max_p_slack_kw_abs_diff"] = max(p_slack) * 1e3
+            metrics["max_total_p_loss_kw_abs_diff"] = max(p_loss) * 1e3
+            metrics["mean_p_slack_kw_abs_diff"] = sum(p_slack) / len(p_slack) * 1e3
+            metrics["mean_total_p_loss_kw_abs_diff"] = (
+                sum(p_loss) / len(p_loss) * 1e3
+            )
+        if trafo_rows:
+            trafo_pl = [float(row["pl_mw_abs_diff"]) for row in trafo_rows]
+            metrics["max_trafo_pl_kw_abs_diff"] = max(trafo_pl) * 1e3
+            metrics["mean_trafo_pl_kw_abs_diff"] = (
+                sum(trafo_pl) / len(trafo_pl) * 1e3
+            )
+
+    convergence_note = (
+        "yes" if metrics["all_scope_matched_converged"] else "check exported CSV"
+    )
     text = """\
 # Experiment 1b – example_simple() Validation Results
 
@@ -1086,6 +1154,35 @@ def write_readme(results_dir: Path) -> None:
 | structure_summary.csv/json | Netzstruktur nach Switch-Verarbeitung |
 | metadata.json | Solver-Parameter, Zeitstempel, bekannte Einschränkungen |
 
+## Trafo-Magnetisierung
+
+Die Trafo-Magnetisierungsstempelung wurde am 2026-05-19 korrigiert. Es wird weiterhin ein
+Pi-Ersatzschaltbild verwendet. Die aus `pfe_kw` und `i0_percent` abgeleitete
+Leerlaufadmittanz wird als gesamte Magnetisierungsadmittanz
+`y_m = g_m - j*b_m` interpretiert und im Pi-Modell je zur Hälfte auf HV- und
+LV-Klemme verteilt. Der HV-Selbstadmittanzterm wird mit `tap * conj(tap)`
+transformiert; die Off-Diagonalterme verwenden die konjugierten komplexen
+Tap-Faktoren. Dadurch wird die Magnetisierung nicht mehr effektiv doppelt
+gezählt.
+
+## Scope-matched Ergebnis nach der Korrektur
+
+| Kennzahl | Wert |
+|----------|-----:|
+| Scope-matched Szenarien konvergent | {convergence_note} |
+| Anzahl scope_matched Szenarien | {n_scope_matched} |
+| max `max_vm_pu_abs_diff` | {max_vm:.8e} p.u. |
+| max `max_va_degree_abs_diff` | {max_va:.8e} deg |
+| max `p_slack_mw_abs_diff` | {max_p_slack_kw:.6f} kW |
+| mean `p_slack_mw_abs_diff` | {mean_p_slack_kw:.6f} kW |
+| max `total_p_loss_mw_abs_diff` | {max_p_loss_kw:.6f} kW |
+| mean `total_p_loss_mw_abs_diff` | {mean_p_loss_kw:.6f} kW |
+| max `trafo_pl_mw_abs_diff` | {max_trafo_pl_kw:.6f} kW |
+| mean `trafo_pl_mw_abs_diff` | {mean_trafo_pl_kw:.6f} kW |
+
+Der fruehere systematische Wirkleistungsoffset von ca. 14.36 kW ist damit im
+aktuellen `scope_matched`-Hauptlauf verschwunden bzw. auf wenige Watt reduziert.
+
 ## Referenzmodi
 
 - **scope_matched**: gen → sgen(Q=0); strikter Vergleich
@@ -1100,7 +1197,21 @@ combined_high_load_low_sgen, combined_low_load_high_sgen
 
 - Kein PV-Bus-Enforcement in diffpf → Q-Abweichungen am gen-Bus erwartet
 - Flat Start schlägt bei 150°-Trafo fehl → trafo_shift_aware Initialisierung verwendet
+- Weiterhin kein Anspruch auf vollständige pandapower-Featureparität für alle
+  Transformatorfälle
 """
+    text = text.format(
+        convergence_note=convergence_note,
+        n_scope_matched=metrics["n_scope_matched"],
+        max_vm=metrics["max_vm_pu_abs_diff"],
+        max_va=metrics["max_va_degree_abs_diff"],
+        max_p_slack_kw=metrics["max_p_slack_kw_abs_diff"],
+        mean_p_slack_kw=metrics["mean_p_slack_kw_abs_diff"],
+        max_p_loss_kw=metrics["max_total_p_loss_kw_abs_diff"],
+        mean_p_loss_kw=metrics["mean_total_p_loss_kw_abs_diff"],
+        max_trafo_pl_kw=metrics["max_trafo_pl_kw_abs_diff"],
+        mean_trafo_pl_kw=metrics["mean_trafo_pl_kw_abs_diff"],
+    )
     path = results_dir / "README.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

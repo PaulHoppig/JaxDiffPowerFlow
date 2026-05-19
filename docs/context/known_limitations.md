@@ -44,15 +44,25 @@ Für die geplante Upstream-Kopplung wird die PV-Anlage als wetterabhängige P/Q-
 
 ## Transformator-Modellparität
 
-`diffpf` unterstützt 2-Wicklungs-Transformatoren mit Pi-Modell, Tap und Phasenverschiebung. Im `example_simple()`-Netz bleibt jedoch ein systematischer Offset bei Transformatorflüssen und Verlusten gegenüber `pandapower`.
+`diffpf` unterstützt 2-Wicklungs-Transformatoren mit Pi-Modell, Tap und Phasenverschiebung.
+
+Stand 2026-05-19: Die Pi-Stempelung der aus `pfe_kw` und `i0_percent`
+abgeleiteten Trafo-Magnetisierungsadmittanz wurde korrigiert. Die gesamte
+Leerlaufadmittanz `y_m = g_m - j*b_m` wird nun je zur Hälfte auf HV- und
+LV-Klemme verteilt; der HV-Selbstadmittanzterm wird mit `tap * conj(tap)`
+transformiert. Der früher beobachtete ca. 14-kW-Wirkleistungsoffset in
+Slackleistung, Gesamtwirkverlusten und Trafoverlusten ist im
+`scope_matched`-Hauptlauf von Experiment 1 dadurch auf wenige Watt reduziert.
 
 Aktueller Befund:
 
 - Knotenspannungen stimmen im `scope_matched`-Modus sehr gut überein.
 - Leitungsverluste stimmen sehr gut überein.
-- Trafoverluste, Slack-P/Q und Trafoflüsse zeigen einen systematischen Offset.
-
-Naheliegende Ursache ist eine nicht vollständig identische Trafo-Stempelung bzw. Verlust-/Shift-Behandlung, besonders wegen der 150°-Phasenverschiebung des Transformators in `example_simple()`.
+- Trafo-Wirkverluste, Slack-Wirkleistung und Gesamtwirkverluste stimmen im
+  `scope_matched`-Modus nun im Bereich weniger Watt überein.
+- Bei Blindleistung und vollständiger `pandapower`-Trafosemantik können
+  weiterhin kleine Unterschiede verbleiben; die Validierung ist weiterhin
+  demonstratorbezogen.
 
 Future Work:
 

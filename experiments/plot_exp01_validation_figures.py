@@ -348,15 +348,17 @@ error metrics are multiplied by 1000 and shown in kW or kVAr.
 
 Files: `fig01_scope_matched_error_by_scenario.png` and
 `fig01_scope_matched_error_by_scenario.pdf`. This figure shows whether the
-error metrics stay stable over the seven operating scenarios. A nearly flat
-curve supports the interpretation of a systematic model-structural offset.
+error metrics stay stable over the seven operating scenarios. After the
+2026-05-19 transformer magnetization-stamp correction, active-power errors are
+expected to be near the few-watt numerical-noise range rather than the former
+systematic 14-kW offset.
 
 ## Figure 2
 
 Files: `fig02_scope_matched_error_boxplots.png` and
 `fig02_scope_matched_error_boxplots.pdf`. This figure is descriptive. It shows
 median, spread, and the individual scenario values for each metric, but it is
-not statistical proof of the offset interpretation.
+not statistical proof of full pandapower parity.
 
 ## Limitations
 

@@ -176,6 +176,9 @@ def _raw_trafo_to_spec(
     i0 = raw.i0_percent / 100.0
     p_fe = raw.pfe_kw / (raw.sn_mva * 1000.0)   # pu auf Trafo-Basis
     g_mag_trafo = p_fe
+    # Store b_mag as a positive no-load susceptance magnitude. The Y-bus
+    # transformer stamp uses the inductive convention y_m = g_m - j*b_m and
+    # splits this total no-load admittance over both pi terminals.
     b_mag_trafo = math.sqrt(max(i0**2 - p_fe**2, 0.0))
 
     # Umrechnung auf Systembasis: Leitwert Y_sys = Y_trafo * (sn_mva / s_base)

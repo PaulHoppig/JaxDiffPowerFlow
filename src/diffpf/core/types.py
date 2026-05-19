@@ -63,7 +63,7 @@ class TrafoSpec:
     r_pu: float
     x_pu: float
     g_mag_pu: float = 0.0   # magnetising conductance (iron losses)
-    b_mag_pu: float = 0.0   # magnetising susceptance (no-load current)
+    b_mag_pu: float = 0.0   # positive magnetising susceptance magnitude
     tap_ratio: float = 1.0  # final tap factor (dimensionless)
     shift_rad: float = 0.0  # phase shift in radians
     name: str = ""

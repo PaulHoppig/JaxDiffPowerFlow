@@ -9,16 +9,22 @@ Each Pi-model line contributes four stamps to Y_bus:
 
 where y_series = 1 / (r + jx)  and  y_shunt = j * b_shunt.
 
-For transformers with tap ratio ``a`` and phase shift ``phi``, the
-admittance ``y_t = g + jb`` (series) and shunt admittance ``y_m = g_m + jb_m``
-yield the following Pi-model stamps (off-nominal tap, HV=from, LV=to):
+For transformers with tap ratio ``a`` and phase shift ``phi``, the series
+admittance ``y_t = g + jb`` and the *total* no-load admittance
+``y_m = g_m - j*b_m`` yield the following Pi-model stamps (off-nominal tap,
+HV=from, LV=to):
 
-  Y[hv, hv] += (y_t + y_m) / a²
-  Y[lv, lv] += (y_t + y_m)
-  Y[hv, lv] += -y_t / (a · exp(-j·phi)) = -y_t / conj(t)
-  Y[lv, hv] += -y_t / (a · exp( j·phi)) = -y_t / t
+  y_m_hv = y_m / 2
+  y_m_lv = y_m / 2
+  t = a · exp(j·phi)
 
-where t = a · exp(j·phi).
+  Y[hv, hv] += (y_t + y_m_hv) / (t · conj(t))
+  Y[lv, lv] +=  y_t + y_m_lv
+  Y[hv, lv] += -y_t / conj(t)
+  Y[lv, hv] += -y_t / t
+
+``b_m`` is stored as the positive no-load susceptance magnitude; the inductive
+pandapower convention is therefore represented as ``g_m - j*b_m``.
 
 Shunts add directly to the diagonal:
   Y[bus, bus] += g_sh + j·b_sh
@@ -89,15 +95,17 @@ def build_ybus(
             hv = params.trafo_hv_bus[k]
             lv = params.trafo_lv_bus[k]
             y_t = params.trafo_g_series_pu[k] + 1j * params.trafo_b_series_pu[k]
-            y_m = params.trafo_g_mag_pu[k] + 1j * params.trafo_b_mag_pu[k]
+            y_m = params.trafo_g_mag_pu[k] - 1j * params.trafo_b_mag_pu[k]
+            y_m_hv = 0.5 * y_m
+            y_m_lv = 0.5 * y_m
             a = params.trafo_tap_ratio[k]           # tap magnitude
             phi = params.trafo_shift_rad[k]          # phase shift rad
             # complex tap: t = a * exp(j*phi)
             t = a * jnp.exp(1j * phi)
             t_conj = jnp.conj(t)
-            a2 = (a * a).real
-            y_bus = y_bus.at[hv, hv].add((y_t + y_m) / a2)
-            y_bus = y_bus.at[lv, lv].add(y_t + y_m)
+            tap_abs_sq = t * t_conj
+            y_bus = y_bus.at[hv, hv].add((y_t + y_m_hv) / tap_abs_sq)
+            y_bus = y_bus.at[lv, lv].add(y_t + y_m_lv)
             y_bus = y_bus.at[hv, lv].add(-y_t / t_conj)
             y_bus = y_bus.at[lv, hv].add(-y_t / t)
 

@@ -229,6 +229,9 @@ def _compute_trafo_spec(
     # Magnetisierung (auf Trafo-Nennbasis pu)
     i0 = i0_percent / 100.0
     p_fe_pu_trafo = pfe_kw / (sn_mva * 1000.0)
+    # Store b_mag as a positive no-load susceptance magnitude. The numerical
+    # Y-bus stamp applies the pandapower pi convention y_m = g_m - j*b_m and
+    # splits this total magnetizing admittance over both transformer terminals.
     b_mag_trafo = math.sqrt(max(i0**2 - p_fe_pu_trafo**2, 0.0))
 
     # Auf Systembasis: Y_sys = Y_trafo * (sn_mva / s_base)
