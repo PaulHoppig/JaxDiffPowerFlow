@@ -44,8 +44,21 @@ RESULTS_DIR = (
 )
 
 NEWTON_OPTIONS = NewtonOptions(max_iters=50, tolerance=1e-10, damping=0.7)
-FD_STEP_DEFAULT = 1e-4
+FD_STEP_DEFAULT = 1e-3
 FD_STEPS_STUDY = (1e-2, 1e-3, 1e-4, 1e-5, 1e-6)
+FD_STEPS_DETAILED: tuple[float, ...] = (
+    1e+0, 5e-1, 2e-1,
+    1e-1, 5e-2, 2e-2,
+    1e-2, 5e-3, 2e-3,
+    1e-3, 5e-4, 2e-4,
+    1e-4, 5e-5, 2e-5,
+    1e-5, 5e-6, 2e-6,
+    1e-6, 5e-7, 2e-7,
+    1e-7, 5e-8, 2e-8,
+    1e-8, 5e-9, 2e-9,
+    1e-9, 5e-10, 2e-10,
+    1e-10,
+)
 
 
 @dataclass(frozen=True)
@@ -213,6 +226,47 @@ class StepStudyRow:
     fd_minus_converged: bool
 
 
+@dataclass(frozen=True)
+class StepStudyDetailedRow:
+    """One detailed FD step-size study row with per-direction convergence diagnostics."""
+
+    selected_gradient_id: str
+    scenario: str
+    input_parameter: str
+    output_observable: str
+    fd_step: float
+    ad_grad: float
+    fd_grad: float
+    abs_error: float
+    rel_error: float
+    fd_plus_converged: bool
+    fd_minus_converged: bool
+    fd_plus_iterations: int
+    fd_minus_iterations: int
+    fd_plus_residual_norm: float
+    fd_minus_residual_norm: float
+
+
+@dataclass(frozen=True)
+class StepStudyDetailedSummaryRow:
+    """Per-gradient summary statistics from the detailed FD step study."""
+
+    selected_gradient_id: str
+    scenario: str
+    input_parameter: str
+    output_observable: str
+    best_fd_step: float
+    best_rel_error: float
+    worst_fd_step: float
+    worst_rel_error: float
+    stable_range_start: float
+    stable_range_end: float
+    fd_instability_at_small_h: bool
+    n_converged: int
+    n_total: int
+    notes: str
+
+
 class ScenarioInputs(NamedTuple):
     """Compiled inputs for one scenario."""
 
@@ -233,6 +287,10 @@ class SolveDiagnostics(NamedTuple):
 GRADIENT_TABLE_COLUMNS = tuple(field.name for field in fields(GradientTableRow))
 ERROR_SUMMARY_COLUMNS = tuple(field.name for field in fields(ErrorSummaryRow))
 FD_STEP_STUDY_COLUMNS = tuple(field.name for field in fields(StepStudyRow))
+FD_STEP_STUDY_DETAILED_COLUMNS = tuple(field.name for field in fields(StepStudyDetailedRow))
+FD_STEP_STUDY_DETAILED_SUMMARY_COLUMNS = tuple(
+    field.name for field in fields(StepStudyDetailedSummaryRow)
+)
 
 
 def robust_relative_error(ad_grad: float, fd_grad: float, floor: float = 1e-12) -> float:
@@ -721,6 +779,157 @@ def build_fd_step_study() -> list[StepStudyRow]:
     return rows
 
 
+def build_fd_step_study_detailed() -> list[StepStudyDetailedRow]:
+    """Run the detailed FD step study (h = 1e0 ... 1e-10) for three selected gradients."""
+
+    scenario_inputs_by_name = {scenario.name: build_scenario_inputs(scenario) for scenario in SCENARIOS}
+    input_specs = {spec.name: spec for spec in INPUT_PARAMETERS}
+    output_specs = {spec.name: spec for spec in OUTPUT_OBSERVABLES}
+    rows: list[StepStudyDetailedRow] = []
+
+    for scenario_name, input_name, output_name in STEP_STUDY_SELECTIONS:
+        scenario_inputs = scenario_inputs_by_name[scenario_name]
+        scalar_fn = _scalar_function(scenario_inputs, input_name, output_name)
+        selected_id = f"{scenario_name}:{input_name}->{output_name}"
+        ad_grad = float(jax.grad(scalar_fn)(jnp.asarray(1.0, dtype=jnp.float64)))
+
+        for step in FD_STEPS_DETAILED:
+            plus_params = apply_input_parameter(
+                scenario_inputs.params,
+                input_name,
+                jnp.asarray(1.0 + step, dtype=jnp.float64),
+                scenario_inputs.metadata,
+            )
+            minus_params = apply_input_parameter(
+                scenario_inputs.params,
+                input_name,
+                jnp.asarray(1.0 - step, dtype=jnp.float64),
+                scenario_inputs.metadata,
+            )
+            plus_diag = _solve_diagnostics(
+                scenario_inputs.topology,
+                plus_params,
+                scenario_inputs.state0,
+            )
+            minus_diag = _solve_diagnostics(
+                scenario_inputs.topology,
+                minus_params,
+                scenario_inputs.state0,
+            )
+
+            if plus_diag.converged and minus_diag.converged:
+                fd_grad = _finite_difference(scalar_fn, 1.0, step)
+                abs_error = abs(ad_grad - fd_grad)
+                rel_error = robust_relative_error(ad_grad, fd_grad)
+            else:
+                fd_grad = abs_error = rel_error = float("nan")
+
+            rows.append(
+                StepStudyDetailedRow(
+                    selected_gradient_id=selected_id,
+                    scenario=scenario_name,
+                    input_parameter=input_specs[input_name].name,
+                    output_observable=output_specs[output_name].name,
+                    fd_step=step,
+                    ad_grad=ad_grad,
+                    fd_grad=fd_grad,
+                    abs_error=abs_error,
+                    rel_error=rel_error,
+                    fd_plus_converged=plus_diag.converged,
+                    fd_minus_converged=minus_diag.converged,
+                    fd_plus_iterations=plus_diag.iterations,
+                    fd_minus_iterations=minus_diag.iterations,
+                    fd_plus_residual_norm=plus_diag.residual_norm,
+                    fd_minus_residual_norm=minus_diag.residual_norm,
+                )
+            )
+    return rows
+
+
+def build_fd_step_study_detailed_summary(
+    detailed_rows: list[StepStudyDetailedRow],
+) -> list[StepStudyDetailedSummaryRow]:
+    """Compute best/worst step and stability diagnostics per representative gradient."""
+
+    groups: dict[str, list[StepStudyDetailedRow]] = {}
+    for row in detailed_rows:
+        groups.setdefault(row.selected_gradient_id, []).append(row)
+
+    summary_rows: list[StepStudyDetailedSummaryRow] = []
+    for gid, rows in sorted(groups.items()):
+        converged = [
+            r for r in rows
+            if r.fd_plus_converged and r.fd_minus_converged and math.isfinite(r.rel_error)
+        ]
+        n_total = len(rows)
+        n_converged = len(converged)
+
+        if not converged:
+            summary_rows.append(
+                StepStudyDetailedSummaryRow(
+                    selected_gradient_id=gid,
+                    scenario=rows[0].scenario,
+                    input_parameter=rows[0].input_parameter,
+                    output_observable=rows[0].output_observable,
+                    best_fd_step=float("nan"),
+                    best_rel_error=float("nan"),
+                    worst_fd_step=float("nan"),
+                    worst_rel_error=float("nan"),
+                    stable_range_start=float("nan"),
+                    stable_range_end=float("nan"),
+                    fd_instability_at_small_h=False,
+                    n_converged=n_converged,
+                    n_total=n_total,
+                    notes="No converged FD evaluations.",
+                )
+            )
+            continue
+
+        best = min(converged, key=lambda r: r.rel_error)
+        worst = max(converged, key=lambda r: r.rel_error)
+
+        stable_threshold = max(best.rel_error * 10.0, 1e-10)
+        stable = sorted(
+            [r for r in converged if r.rel_error <= stable_threshold],
+            key=lambda r: r.fd_step,
+        )
+        stable_range_start = stable[-1].fd_step if stable else float("nan")
+        stable_range_end = stable[0].fd_step if stable else float("nan")
+
+        sorted_asc = sorted(converged, key=lambda r: r.fd_step)
+        fd_instability = False
+        if len(sorted_asc) >= 2:
+            smallest = sorted_asc[0]
+            second = sorted_asc[1]
+            fd_instability = smallest.rel_error > second.rel_error * 2.0
+
+        notes_parts: list[str] = []
+        if fd_instability:
+            notes_parts.append("FD instability detected at smallest step sizes.")
+        if n_converged < n_total:
+            notes_parts.append(f"{n_total - n_converged} step(s) did not converge.")
+
+        summary_rows.append(
+            StepStudyDetailedSummaryRow(
+                selected_gradient_id=gid,
+                scenario=rows[0].scenario,
+                input_parameter=rows[0].input_parameter,
+                output_observable=rows[0].output_observable,
+                best_fd_step=best.fd_step,
+                best_rel_error=best.rel_error,
+                worst_fd_step=worst.fd_step,
+                worst_rel_error=worst.rel_error,
+                stable_range_start=stable_range_start,
+                stable_range_end=stable_range_end,
+                fd_instability_at_small_h=fd_instability,
+                n_converged=n_converged,
+                n_total=n_total,
+                notes="; ".join(notes_parts),
+            )
+        )
+    return summary_rows
+
+
 def summarize_errors(rows: list[GradientTableRow]) -> list[ErrorSummaryRow]:
     """Aggregate gradient errors by scenario and input parameter."""
 
@@ -833,6 +1042,7 @@ def write_metadata(results_dir: Path) -> None:
         },
         "fd_step_default": FD_STEP_DEFAULT,
         "fd_step_study_steps": list(FD_STEPS_STUDY),
+        "fd_step_detailed_steps": list(FD_STEPS_DETAILED),
         "fd_step_study_selection": [
             {
                 "scenario": scenario,
@@ -865,20 +1075,56 @@ def write_metadata(results_dir: Path) -> None:
 def write_readme(results_dir: Path) -> None:
     """Write a compact human-readable description of the artifacts."""
 
-    text = """# Experiment 2b - example_simple() Gradient Validation
+    text = f"""# Experiment 2b - example_simple() Gradient Validation
 
-This directory contains a compact AD-vs-central-finite-difference validation for
-the scope-matched pandapower `example_simple()` network. The active `gen` is
+This directory contains the AD-vs-central-finite-difference validation for the
+scope-matched pandapower `example_simple()` network. The active `gen` is
 converted to `sgen(P, Q=0)`, matching the current diffpf model scope.
 
-`gradient_table.csv` is long-format: one row is one
-scenario/input-parameter/output-observable gradient. `error_summary.csv`
-aggregates those rows by scenario and input parameter. `fd_step_study.csv`
-contains only three representative gradients over five finite-difference steps.
+## Re-run after core/modelling changes
 
-The run intentionally avoids a full Jacobian over all network parameters. It
-does not validate Q limits, PV-to-PQ switching, controller behaviour, tap
-control, or the original pandapower generator voltage-regulation semantics.
+Experiment 2 was re-run on {datetime.now(timezone.utc).strftime("%Y-%m-%d")} after the following
+core and modelling changes were applied (see CHANGELOG.md):
+- Corrected transformer magnetisation admittance in the Pi stamp (`ybus.py`).
+- Scope-matched open-line policy for `example_simple()` (`exp01`).
+- Updated Exp.-1 artefacts validated to near round-off level.
+
+The mandatory 48-gradient run (3 scenarios x 4 inputs x 4 observables) was
+re-executed. All gradients are computed with implicit automatic differentiation
+and compared against central finite differences.
+
+## Artefact descriptions
+
+`gradient_table.csv` is long-format: one row per
+scenario/input-parameter/output-observable gradient.
+`error_summary.csv` aggregates those rows by scenario and input parameter.
+`fd_step_study.csv` contains three representative gradients over five
+finite-difference steps (compact reference; kept for backwards compatibility).
+
+`fd_step_study_detailed.csv` contains the same three representative gradients
+over the extended logarithmic grid h = 1e0 ... 1e-10 (11 steps, 33 rows total).
+The detailed study adds per-direction convergence diagnostics
+(iterations and residual norm).
+`fd_step_study_detailed_summary.csv` provides one row per representative
+gradient with best/worst step and stability annotation.
+
+## FD-vs-FD stability
+
+The plot script additionally computes FD-vs-FD neighbour-pair differences from
+the detailed study. These are written to
+`figures/fd_vs_fd_step_stability_detailed.csv`. The FD-vs-FD analysis is a
+diagnostic of the finite-difference reference itself and does not replace the
+AD-vs-FD main comparison.
+
+## Known limitations
+
+- Local gradient validation at a fixed operating point (theta0 = 1.0).
+- Topology is static; no branch switching or topology changes.
+- Only continuous scaling parameters; no full Jacobian export.
+- scope-matched: gen is converted to sgen(P, Q=0); no voltage regulation.
+- No generator Q limits, no PV-to-PQ switching, no controller behaviour.
+- Gradients at very small FD steps may show cancellation effects; the shunt-Q
+  case is most sensitive because its gradient is comparatively small.
 """
     path = results_dir / "README.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -890,6 +1136,8 @@ def export_all(
     summary_rows: list[ErrorSummaryRow],
     step_rows: list[StepStudyRow],
     results_dir: Path,
+    step_detailed_rows: list[StepStudyDetailedRow] | None = None,
+    step_detailed_summary_rows: list[StepStudyDetailedSummaryRow] | None = None,
 ) -> None:
     """Export all mandatory CSV/JSON artifacts and metadata."""
 
@@ -899,6 +1147,23 @@ def export_all(
     _write_json(results_dir / "error_summary.json", summary_rows)
     _write_csv(results_dir / "fd_step_study.csv", step_rows, FD_STEP_STUDY_COLUMNS)
     _write_json(results_dir / "fd_step_study.json", step_rows)
+    if step_detailed_rows is not None:
+        _write_csv(
+            results_dir / "fd_step_study_detailed.csv",
+            step_detailed_rows,
+            FD_STEP_STUDY_DETAILED_COLUMNS,
+        )
+        _write_json(results_dir / "fd_step_study_detailed.json", step_detailed_rows)
+    if step_detailed_summary_rows is not None:
+        _write_csv(
+            results_dir / "fd_step_study_detailed_summary.csv",
+            step_detailed_summary_rows,
+            FD_STEP_STUDY_DETAILED_SUMMARY_COLUMNS,
+        )
+        _write_json(
+            results_dir / "fd_step_study_detailed_summary.json",
+            step_detailed_summary_rows,
+        )
     write_metadata(results_dir)
     write_readme(results_dir)
 
@@ -912,7 +1177,18 @@ def main() -> None:
     gradient_rows = build_gradient_table()
     summary_rows = summarize_errors(gradient_rows)
     step_rows = build_fd_step_study()
-    export_all(gradient_rows, summary_rows, step_rows, RESULTS_DIR)
+    print()
+    print("Running detailed FD step study (h = 1e0 ... 1e-10) ...")
+    step_detailed_rows = build_fd_step_study_detailed()
+    step_detailed_summary_rows = build_fd_step_study_detailed_summary(step_detailed_rows)
+    export_all(
+        gradient_rows,
+        summary_rows,
+        step_rows,
+        RESULTS_DIR,
+        step_detailed_rows=step_detailed_rows,
+        step_detailed_summary_rows=step_detailed_summary_rows,
+    )
 
     print()
     print("Aggregated error summary:")

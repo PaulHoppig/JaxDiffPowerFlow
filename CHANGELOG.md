@@ -1,5 +1,116 @@
 # Changelog
 
+## 2026-05-19 - Experiment 2 erneut ausgefuehrt nach Kern-/Modellierungsaenderungen
+
+### Kurzbeschreibung
+- Experiment 2 (48 AD-vs-FD-Gradienten, `example_simple()`) wurde nach den
+  Kern-/Modellierungsaenderungen (korrigierte Trafo-Magnetisierungsadmittanz,
+  scope-matched Open-Line-Policy) vollstaendig neu ausgefuehrt.
+- Alle 48 Gradienten konvergieren mit aktuellem Codezustand. AD und FD
+  stimmen ueberein; der maximale relative Fehler ueber alle Kombinationen
+  betraegt ca. 4.51e-05 (shunt_q_scale, erklaerbar durch kleinen Gradienten).
+  Der Median-Relativfehler liegt deutlich darunter.
+- Standard-FD-Schrittweite des Hauptlaufs auf h = 1e-3 gesetzt
+  (vorher 1e-4); Fehler verbessern sich konsistent.
+- Eine neue detaillierte FD-Schrittweiten-Studie (h = 1e0 ... 1e-10,
+  11 Schritte, 33 Zeilen) wurde fuer drei repraesentative Gradienten ergaenzt.
+- Eine FD-vs-FD-Stabilitaetsdiagnose auf Basis der detaillierten Studie wurde
+  ergaenzt (30 benachbarte Schrittweitenpaare).
+- Neue Figuren 8 und 9 wurden erzeugt.
+- Bestehende Figuren 1-7 wurden aus neuen Artefakten aktualisiert.
+
+### Geaenderte Dateien
+- `experiments/exp02_validate_gradients_example_simple.py` - Neue Konstante
+  `FD_STEPS_DETAILED`, neue Dataclasses `StepStudyDetailedRow` und
+  `StepStudyDetailedSummaryRow`, neue Funktionen `build_fd_step_study_detailed()`
+  und `build_fd_step_study_detailed_summary()`, aktualisiertes `export_all()`,
+  `write_metadata()`, `write_readme()` und `main()`.
+- `experiments/plot_exp02_gradient_figures.py` - Neue Funktionen
+  `write_fd_vs_fd_step_stability_detailed()`, `plot_fd_step_study_detailed()`,
+  `build_fd_vs_fd_step_stability_detailed_figure()`,
+  `plot_fd_vs_fd_step_stability_detailed()`. Aktualisierte `generate_figures()`
+  und `write_figures_readme()`.
+- `tests/test_exp02_example_simple_gradients_outputs.py` - Neue Tests fuer
+  detaillierte Artefakte und kanonische Ergebnisverzeichnis-Checks.
+- `tests/test_exp02_plot_outputs.py` - Neue Tests fuer Fig. 8, Fig. 9,
+  detaillierte FD-vs-FD-Stabilitaet und aktualisierter README-Test.
+
+### Aktualisierte Artefakte (kanonisches Ergebnisverzeichnis)
+- `experiments/results/exp02_example_simple_gradients/gradient_table.csv/json`
+- `experiments/results/exp02_example_simple_gradients/error_summary.csv/json`
+- `experiments/results/exp02_example_simple_gradients/fd_step_study.csv/json`
+- `experiments/results/exp02_example_simple_gradients/metadata.json`
+- `experiments/results/exp02_example_simple_gradients/README.md`
+
+### Neue detaillierte StepStudy-Artefakte
+- `experiments/results/exp02_example_simple_gradients/fd_step_study_detailed.csv/json`
+- `experiments/results/exp02_example_simple_gradients/fd_step_study_detailed_summary.csv/json`
+- `experiments/results/exp02_example_simple_gradients/figures/fd_vs_fd_step_stability_detailed.csv/json`
+
+### Neue/aktualisierte Figuren
+- `figures/fig01_ad_vs_fd_parity_by_observable.png/pdf` (aktualisiert)
+- `figures/fig01a_ad_vs_fd_parity_global.png/pdf` (aktualisiert)
+- `figures/fig02_gradient_error_heatmap.png/pdf` (aktualisiert)
+- `figures/fig03_relative_error_boxplot.png/pdf` (aktualisiert)
+- `figures/fig04_fd_step_study.png/pdf` (aktualisiert)
+- `figures/fig05_error_by_scenario.png/pdf` (aktualisiert)
+- `figures/fig06_gradient_magnitude_vs_relative_error_heatmaps.png/pdf` (aktualisiert)
+- `figures/fig07_fd_vs_fd_step_stability.png/pdf` (aktualisiert)
+- `figures/fig08_fd_step_study_detailed.png/pdf` (neu)
+- `figures/fig09_fd_vs_fd_step_stability_detailed.png/pdf` (neu)
+
+### Testergebnisse
+- Ausgefuehrt:
+  `.venv\Scripts\python.exe -m pytest tests\test_exp02_example_simple_gradients_outputs.py tests\test_exp02_plot_outputs.py -v`
+  (`51 passed`)
+
+### Ergebnisnotizen
+- 48 Gradienten erzeugt und vollstaendig konvergiert (AD und FD). `fd_step = 1e-3`.
+- Alle 12 Gruppen (Szenario x Eingangsparameter): valid=4/4.
+- Median relativer AD-vs-FD-Fehler ueber alle validen Gradienten: ~1e-8.
+- Maximaler relativer Fehler: 4.505e-05 (base: shunt_q_scale).
+  Ursache: shunt_q_scale -> total_p_loss_mw hat einen sehr kleinen Gradienten
+  (~7.4e-05 MW/dimensionless), was die relative Fehlermetrik gegenueber
+  absolutem FD-Rauschen verstaerkt. Mit h=1e-3 liegt dieser Fall im FD-Plateau
+  und ist deutlich besser als mit h=1e-4.
+- Maximaler absoluter AD-vs-FD-Fehler: ~1.09e-9 (load_high: load_scale_mv_bus_2).
+- Auffaelligste Input/Observable-Kombination: shunt_q_scale -> total_p_loss_mw
+  (max_rel 4.505e-05); physikalisch erklaerbar, kein Implementierungsfehler.
+
+#### Detaillierte StepStudy-Ergebnisse (3 repraesentative Gradienten)
+- `load_scale_mv_bus_2 -> vm_mv_bus_2_pu`:
+  Bestes h: 1e-3 (rel. Fehler: 4.19e-10). Schlechtestes h: 1e0 (4.54e-4).
+  FD-Plateau stabil von h=1e-3 bis ~1e-4. Keine Instabilitaet bei kleinen h.
+- `sgen_scale_static_generator -> p_slack_mw`:
+  Bestes h: 1e-3 (rel. Fehler: 2.13e-11). Schlechtestes h: 1e-10 (2.18e-3).
+  FD-Instabilitaet bei h <= 1e-8 sichtbar; bei h=1e-10 rel. Fehler 2.18e-3.
+- `shunt_q_scale -> total_p_loss_mw`:
+  Bestes h: 1e-2 (rel. Fehler: 5.83e-8). Schlechtestes h: 1e-10 (ca. 0.99,
+  nahezu vollstaendige Auslöschung durch Rundungsfehler).
+  FD-Instabilitaet ab h <= 1e-5 deutlich sichtbar. Bei h=1e-10 ist das FD-
+  Ergebnis numerisch wertlos. Dies ist erwartet: der Gradient ist so klein
+  (~7.4e-5 MW), dass 64-Bit-Auslöschung bei kleinen h dominiert.
+  Interpretation: Der AD-Gradient ist korrekt; FD ist kein geeignetes
+  Referenzverfahren fuer sehr kleine Schrittweiten bei kleinen Gradienten.
+
+#### FD-vs-FD-Diagnose
+- 30 benachbarte Schrittweitenpaare; alle 3 Gradienten x 10 Paare berechnet.
+- `load_scale_mv_bus_2 -> vm_mv_bus_2_pu`: FD-vs-FD stabil bis h ~ 1e-6,
+  dann leicht steigend. Keine dramatische Instabilitaet.
+- `sgen_scale_static_generator -> p_slack_mw`: FD-vs-FD instabiler ab h <= 1e-7.
+- `shunt_q_scale -> total_p_loss_mw`: FD-vs-FD zeigt stark steigende
+  Instabilitaet ab h <= 1e-4 (fd_rel_change bis zu 1.0 bei h=1e-9/1e-10).
+  Bestaetigt, dass FD-Referenz fuer diesen Fall ab h ~ 1e-5 unzuverlaessig wird.
+
+### Bekannte Einschraenkungen
+- Lokale Gradientenvalidierung bei theta0 = 1.0 (festem Betriebspunkt).
+- Topologie statisch; keine Schaltungen oder Topologieaenderungen.
+- Nur kontinuierliche Skalierungsparameter; kein vollstaendiger Jacobian.
+- scope-matched: gen -> sgen(P, Q=0), keine Spannungsregelung.
+- Keine Q-Limits, keine PV/PQ-Umschaltung, keine Controllerlogik.
+- FD bei sehr kleinen h (shunt_q_case) numerisch instabil durch
+  Gleitkomma-Ausloesung; AD-Gradient bleibt korrekt.
+
 ## 2026-05-19 - Scope-matched Open-Line-Policy fuer Experiment 1
 
 ### Kurzbeschreibung

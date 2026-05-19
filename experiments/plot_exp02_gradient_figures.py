@@ -992,6 +992,135 @@ def plot_fd_vs_fd_step_stability(
     return save_figure(fig, output_dir, "fig07_fd_vs_fd_step_stability")
 
 
+def write_fd_vs_fd_step_stability_detailed(
+    stability_df: pd.DataFrame,
+    output_dir: Path,
+) -> list[Path]:
+    """Write the detailed FD-vs-FD step-stability table as CSV and JSON."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "fd_vs_fd_step_stability_detailed.csv"
+    json_path = output_dir / "fd_vs_fd_step_stability_detailed.json"
+    stability_df.to_csv(csv_path, index=False)
+    stability_df.to_json(json_path, orient="records", indent=2)
+    return [csv_path, json_path]
+
+
+def plot_fd_step_study_detailed(
+    fd_step_detailed_df: pd.DataFrame,
+    output_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 8: detailed log-log AD-vs-FD step-size study (h = 1e0 ... 1e-10)."""
+
+    step_col = find_column(
+        fd_step_detailed_df, ("fd_step", "step_size"), "fd_step_study_detailed.csv"
+    )
+    rel_col = find_column(
+        fd_step_detailed_df, ("rel_error", "relative_error"), "fd_step_study_detailed.csv"
+    )
+    group_col = (
+        "selected_gradient_id"
+        if "selected_gradient_id" in fd_step_detailed_df.columns
+        else find_column(
+            fd_step_detailed_df, ("output_observable", "observable"), "fd_step_study_detailed.csv"
+        )
+    )
+
+    work = fd_step_detailed_df.copy()
+    work[step_col] = _numeric_series(work, step_col)
+    work[rel_col] = _numeric_series(work, rel_col).abs()
+    work = work.dropna(subset=[step_col, rel_col, group_col])
+    if work.empty:
+        raise ValueError("No finite detailed FD step-study values available for Fig. 8.")
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.3))
+    for group_name, group in work.groupby(group_col, sort=False):
+        group = group.sort_values(step_col)
+        y = np.maximum(group[rel_col].to_numpy(float), EPS_LOG)
+        label = _curve_label(group.iloc[0]) if group_col == "selected_gradient_id" else str(group_name)
+        ax.plot(group[step_col], y, marker="o", linewidth=1.5, label=label)
+
+    # O(h²) reference line: central FD truncation error scales as h²
+    _h_o2 = np.logspace(0, -6, 200)
+    _anc_h, _anc_y = 1e0, 1e-1
+    _y_o2 = _anc_y * (_h_o2 / _anc_h) ** 2
+    ax.plot(_h_o2, _y_o2, linestyle="--", color="dimgray",
+            linewidth=1.0, alpha=0.65, zorder=0)
+    ax.text(4e-1, _anc_y * (4e-1 / _anc_h) ** 2 * 3.0,
+            r"$O(h^2)$", color="dimgray", fontsize=8, ha="right", va="bottom")
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("AD-vs-FD step-size study")
+    ax.set_xlabel("FD step h")
+    ax.set_ylabel("Relative AD-vs-FD error")
+    ax.legend(fontsize=8)
+    ax.grid(True, which="both", alpha=0.3)
+    fig.tight_layout()
+    return save_figure(fig, output_dir, "fig08_fd_step_study_detailed")
+
+
+def build_fd_vs_fd_step_stability_detailed_figure(
+    stability_df: pd.DataFrame,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Build Figure 9: detailed FD-vs-FD stability over step size."""
+
+    required = {
+        "selected_gradient_id",
+        "input_parameter",
+        "output_observable",
+        "fd_step_large",
+        "fd_step_small",
+        "fd_rel_change",
+    }
+    require_columns(stability_df, required, "fd_vs_fd_step_stability_detailed")
+
+    work = stability_df.copy()
+    work["fd_step_large"] = _numeric_series(work, "fd_step_large")
+    work["fd_step_small"] = _numeric_series(work, "fd_step_small")
+    work["fd_rel_change"] = _numeric_series(work, "fd_rel_change").abs()
+    work = work.dropna(subset=["selected_gradient_id", "fd_step_large", "fd_rel_change"])
+    if work.empty:
+        raise ValueError("No finite detailed FD-vs-FD stability rows available for Fig. 9.")
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    for group_id, group in work.groupby("selected_gradient_id", sort=False):
+        group = group.sort_values("fd_step_large")
+        y = np.maximum(group["fd_rel_change"].to_numpy(float), EPS_LOG)
+        label = _fd_stability_label(str(group_id), group.iloc[0])
+        ax.plot(group["fd_step_large"], y, marker="o", linewidth=1.5, label=label)
+
+    # O(h²) reference line: FD-vs-FD neighbour difference also scales as h²
+    # in the truncation-error-dominated region
+    _h_o2 = np.logspace(0, -6, 200)
+    _anc_h, _anc_y = 5e-1, 1e-3
+    _y_o2 = _anc_y * (_h_o2 / _anc_h) ** 2
+    ax.plot(_h_o2, _y_o2, linestyle="--", color="dimgray",
+            linewidth=1.0, alpha=0.65, zorder=0)
+    ax.text(6e-1, _anc_y * (6e-1 / _anc_h) ** 2 * 3.0,
+            r"$O(h^2)$", color="dimgray", fontsize=8, ha="left", va="bottom")
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("FD-vs-FD stability over step size")
+    ax.set_xlabel("Larger FD step h")
+    ax.set_ylabel("Relative change between FD(h) and FD(next smaller h)")
+    ax.legend(fontsize=8)
+    ax.grid(True, which="both", alpha=0.3)
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_fd_vs_fd_step_stability_detailed(
+    stability_df: pd.DataFrame,
+    output_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Figure 9: detailed FD-vs-FD step-stability diagnostic."""
+
+    fig, _ = build_fd_vs_fd_step_stability_detailed_figure(stability_df)
+    return save_figure(fig, output_dir, "fig09_fd_vs_fd_step_stability_detailed")
+
+
 def _scenario_error_summary(error_summary_df: pd.DataFrame) -> pd.DataFrame:
     max_col = find_column(
         error_summary_df,
@@ -1140,6 +1269,30 @@ sensitive at small step sizes because the corresponding gradient is very small.
 This Figure 7 analysis is a pure re-analysis of the existing
 `fd_step_study.csv` artifact. No new power-flow solves, AD gradients, or
 finite-difference runs are performed.
+
+## Figure 8
+
+Files: `fig08_fd_step_study_detailed.png` and `fig08_fd_step_study_detailed.pdf`.
+Data source: `fd_step_study_detailed.csv` (generated by the experiment script).
+Extends Figure 4 with a finer logarithmic step-size grid from h = 1e0 to
+h = 1e-10 (11 steps, 3 representative gradients, 33 rows). Each curve shows
+the relative AD-vs-FD error versus FD step size. This figure is only generated
+when `fd_step_study_detailed.csv` is present in the results directory.
+
+## Figure 9
+
+Files: `fig09_fd_vs_fd_step_stability_detailed.png` and
+`fig09_fd_vs_fd_step_stability_detailed.pdf`.
+Data source: `fd_step_study_detailed.csv` (via the FD-vs-FD diagnostic).
+The companion files `fd_vs_fd_step_stability_detailed.csv` and
+`fd_vs_fd_step_stability_detailed.json` contain one row per neighbouring
+step-size pair (3 gradients x 10 pairs = 30 rows).
+
+Figure 9 extends Figure 7 to the full detailed step-size range. It compares
+`FD(h)` against `FD(h/10)` for h in {{1e0, ..., 1e-1}}. Strongly increasing
+`fd_rel_change` at small h is a sign of finite-difference instability due to
+floating-point cancellation. The shunt-Q case is most sensitive. This analysis
+does not replace the AD-vs-FD main comparison in Figure 8.
 """
     path = figures_dir / "README.md"
     path.write_text(text, encoding="utf-8")
@@ -1173,6 +1326,15 @@ def generate_figures(
     )
     outputs.extend(write_fd_vs_fd_step_stability(fd_stability, target_dir))
     outputs.extend(plot_fd_vs_fd_step_stability(fd_stability, target_dir))
+
+    detailed_path = results_dir / "fd_step_study_detailed.csv"
+    if detailed_path.exists():
+        fd_step_detailed_df = load_csv(detailed_path)
+        fd_stability_detailed = compute_fd_vs_fd_step_stability(fd_step_detailed_df)
+        outputs.extend(write_fd_vs_fd_step_stability_detailed(fd_stability_detailed, target_dir))
+        outputs.extend(plot_fd_step_study_detailed(fd_step_detailed_df, target_dir))
+        outputs.extend(plot_fd_vs_fd_step_stability_detailed(fd_stability_detailed, target_dir))
+
     outputs.append(write_figures_readme(target_dir, results_dir))
     return outputs
 
