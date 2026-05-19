@@ -128,6 +128,32 @@ def test_convert_gen_to_sgen_q_zero(exp_module):
         assert abs(float(row["q_mvar"])) < 1e-12, "Konvertierter gen muss Q=0 haben"
 
 
+def test_open_line_switch_policy_detects_open_line_switches(exp_module):
+    net = exp_module.make_scenario_net(1.0, 1.0)
+
+    assert exp_module.open_line_switch_line_indices(net) == [2]
+
+
+def test_scope_matched_open_line_policy_disables_lines_on_copy(exp_module):
+    net = exp_module.make_scenario_net(1.0, 1.0)
+    converted = exp_module.convert_gen_to_sgen(net)
+
+    policy_net = exp_module.apply_scope_matched_open_line_policy(converted)
+
+    assert bool(converted.line.loc[2, "in_service"]) is True
+    assert bool(policy_net.line.loc[2, "in_service"]) is False
+    for idx in [0, 1, 3]:
+        assert bool(policy_net.line.loc[idx, "in_service"]) is True
+
+
+def test_original_pandapower_reference_keeps_open_line_in_service(
+    base_original_result,
+):
+    assert base_original_result.structure_row.reference_mode == "original_pandapower"
+    assert base_original_result.structure_row.scope_matched_open_line_policy_applied is False
+    assert base_original_result.structure_row.pandapower_reference_active_line_count == 4
+
+
 # ---------------------------------------------------------------------------
 # Solver und Ergebnis-Zeilen
 # ---------------------------------------------------------------------------
@@ -244,6 +270,10 @@ def test_structure_row_has_required_columns(base_scope_matched_result):
         "scenario", "reference_mode",
         "number_of_original_buses", "number_of_internal_buses_after_fusion",
         "number_of_lines_original", "number_of_lines_active_after_switches",
+        "number_of_open_line_switches", "open_line_switch_line_indices",
+        "scope_matched_open_line_policy_applied",
+        "scope_matched_lines_deactivated_in_pp_reference",
+        "pandapower_reference_active_line_count", "diffpf_active_line_count",
         "number_of_trafos_active", "number_of_shunts",
         "number_of_loads", "number_of_sgens", "number_of_gens",
         "bus_fusion_groups", "disabled_lines_due_to_open_switches",
@@ -271,8 +301,19 @@ def test_exactly_one_slack_bus(base_scope_matched_result):
 def test_active_lines_count(base_scope_matched_result):
     row = base_scope_matched_result.structure_row
     # example_simple has lines; one line disabled by open switch → 3 active
-    assert row.number_of_lines_active_after_switches >= 1
+    assert row.number_of_lines_active_after_switches == 3
+    assert row.pandapower_reference_active_line_count == 3
+    assert row.diffpf_active_line_count == 3
     assert row.number_of_lines_active_after_switches < row.number_of_lines_original
+
+
+def test_scope_matched_structure_documents_open_line_policy(base_scope_matched_result):
+    row = base_scope_matched_result.structure_row
+
+    assert row.number_of_open_line_switches == 1
+    assert json.loads(row.open_line_switch_line_indices) == [2]
+    assert row.scope_matched_open_line_policy_applied is True
+    assert json.loads(row.scope_matched_lines_deactivated_in_pp_reference) == [2]
 
 
 def test_trafo_active(base_scope_matched_result):
@@ -376,6 +417,14 @@ def test_json_is_valid(exp_module, base_scope_matched_result):
         assert len(data) == 1
         assert data[0]["scenario"] == "base"
         assert data[0]["reference_mode"] == "scope_matched"
+
+        with (tmp / "metadata.json").open() as f:
+            metadata = json.load(f)
+        assert "scope_matched_open_line_policy" in metadata
+        assert (
+            metadata["scope_matched_open_line_policy"]["applies_to_reference_mode"]
+            == "scope_matched"
+        )
 
 
 def test_results_dir_is_created(exp_module, base_scope_matched_result):

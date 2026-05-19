@@ -1,5 +1,79 @@
 # Changelog
 
+## 2026-05-19 - Scope-matched Open-Line-Policy fuer Experiment 1
+
+### Kurzbeschreibung
+- Der `scope_matched`-pandapower-Referenzlauf in Experiment 1 deaktiviert
+  Leitungen hinter offenen Line-Switches nun vollstaendig mit
+  `net.line.in_service = False`, bevor `runpp()` ausgefuehrt wird.
+- Grund: diffpf entfernt diese Leitungen in der vereinfachten Topologie
+  ebenfalls vollstaendig; pandapower wuerde sonst ueber Hilfsbusse kleine
+  Ladeeffekte offener Leitungen beruecksichtigen.
+- Der `original_pandapower`-Kontextvergleich bleibt unveraendert.
+- Numerischer Kern, Solver, Residuum, Y-Bus und Trafo-Stempelung wurden nicht
+  geaendert.
+
+### Geaenderte Dateien
+- `experiments/exp01_validate_example_simple.py` - Open-Line-Policy fuer
+  `scope_matched`, erweiterte `structure_summary`- und Metadata-Dokumentation.
+- `experiments/exp01_diagnose_residual_voltage_offset.py` - Diagnose auf die
+  neue scope-matched Topologie umgestellt und Branch-Mapping fuer deaktivierte
+  pandapower-Branches robust gemacht.
+- `tests/test_exp01_example_simple_outputs.py` - Tests fuer die Open-Line-
+  Policy und neue Strukturfelder ergaenzt.
+- `tests/test_exp01_residual_voltage_offset_diagnostic.py` - bestehende
+  Diagnose-Hilfsfunktionstests weiter genutzt.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp01_example_simple_validation/*`
+- `experiments/results/exp01_example_simple_validation/figures/*`
+- `experiments/results/exp01_residual_voltage_offset_diagnostic/*`
+
+### Ergebnisnotizen
+- Betroffene Leitung in `example_simple()`: Line `2`.
+- In `scope_matched` sehen pandapower und diffpf nun jeweils `3` aktive
+  Leitungen.
+- Max `max_vm_pu_abs_diff` sinkt von `2.350559e-05 p.u.` auf
+  `4.773959e-14 p.u.`.
+- Max `max_va_degree_abs_diff` sinkt von `2.527126e-04 deg` auf
+  `2.188472e-12 deg`.
+- Max `p_slack_mw_abs_diff` sinkt von `5.776102e-06 MW` auf
+  `1.218972e-10 MW`.
+- Max `total_p_loss_mw_abs_diff` sinkt von `5.775987e-06 MW` auf
+  `1.106781e-12 MW`.
+- Max `trafo_pl_mw_abs_diff` sinkt von `4.700529e-06 MW` auf
+  `3.108624e-14 MW`.
+- Die Restfehlerdiagnose bestaetigt die Ursache: Y-Bus-Maximaldifferenz von
+  `4.178332e-03` auf `0.0`, `lines_only` von `4.178332e-03` auf `0.0`,
+  diffpf-Residuum an der pandapower-Loesung von `4.290311e-03` auf
+  `2.650863e-10`.
+
+### Tests
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_example_simple_outputs.py -q`
+  (`38 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_residual_voltage_offset_diagnostic.py -q`
+  (`4 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_exp01_plot_outputs.py -q`
+  (`9 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_pandapower_adapter.py -q`
+  (`15 passed, 1 xpassed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_ybus.py -q`
+  (`12 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe -m pytest tests/test_trafo.py -q`
+  (`12 passed`)
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp01_validate_example_simple.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/plot_exp01_validation_figures.py`
+- Ausgefuehrt:
+  `.venv\\Scripts\\python.exe experiments/exp01_diagnose_residual_voltage_offset.py`
+
 ## 2026-05-19 - Korrektur der Trafo-Magnetisierungsadmittanz im Pi-Stempel
 
 ### Kurzbeschreibung

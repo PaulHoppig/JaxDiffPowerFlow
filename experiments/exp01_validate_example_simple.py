@@ -214,6 +214,12 @@ class StructureSummaryRow:
     number_of_internal_buses_after_fusion: int
     number_of_lines_original: int
     number_of_lines_active_after_switches: int
+    number_of_open_line_switches: int
+    open_line_switch_line_indices: str
+    scope_matched_open_line_policy_applied: bool
+    scope_matched_lines_deactivated_in_pp_reference: str
+    pandapower_reference_active_line_count: int
+    diffpf_active_line_count: int
     number_of_trafos_active: int
     number_of_shunts: int
     number_of_loads: int
@@ -257,6 +263,37 @@ def convert_gen_to_sgen(net: pp.pandapowerNet) -> pp.pandapowerNet:
             in_service=True,
         )
         net.gen.at[idx, "in_service"] = False
+    return net
+
+
+def open_line_switch_line_indices(net: pp.pandapowerNet) -> list[int]:
+    """Return line indices affected by open line switches."""
+
+    if len(net.switch) == 0:
+        return []
+    line_switches = net.switch[
+        (net.switch["et"] == "l") & (net.switch["closed"] == False)  # noqa: E712
+    ]
+    return sorted({int(row["element"]) for _, row in line_switches.iterrows()})
+
+
+def apply_scope_matched_open_line_policy(
+    net: pp.pandapowerNet,
+) -> pp.pandapowerNet:
+    """Return a copy with open-line-switch lines fully out of service.
+
+    diffpf currently removes lines behind open line switches from its simplified
+    active topology. For the strict ``scope_matched`` comparison, pandapower is
+    forced to solve the same simplified topology instead of retaining dangling
+    line-charging effects through auxiliary buses.
+    """
+
+    net = copy.deepcopy(net)
+    line_indices = open_line_switch_line_indices(net)
+    if line_indices:
+        valid_indices = [idx for idx in line_indices if idx in net.line.index]
+        if valid_indices:
+            net.line.loc[valid_indices, "in_service"] = False
     return net
 
 
@@ -792,6 +829,7 @@ def _extract_structure_row(
     bus_to_repr: dict[int, int],
     disabled_lines: set[int],
     disabled_trafos: set[int],
+    lines_deactivated_in_pp_reference: list[int],
 ) -> StructureSummaryRow:
     # Identify fusion groups
     groups: dict[int, list[int]] = {}
@@ -800,6 +838,13 @@ def _extract_structure_row(
             groups[repr_id] = []
         groups[repr_id].append(orig_id)
     fusion_groups = [v for v in groups.values() if len(v) > 1]
+    open_line_indices = open_line_switch_line_indices(net_pp)
+    diffpf_active_line_count = len(
+        _active_pp_line_indices(net_pp, bus_to_repr, disabled_lines)
+    )
+    pandapower_reference_active_line_count = int(
+        (net_pp.line["in_service"] == True).sum()  # noqa: E712
+    )
 
     return StructureSummaryRow(
         scenario=scenario,
@@ -808,6 +853,16 @@ def _extract_structure_row(
         number_of_internal_buses_after_fusion=len(spec.buses),
         number_of_lines_original=len(net_pp.line),
         number_of_lines_active_after_switches=len(spec.lines),
+        number_of_open_line_switches=len(open_line_indices),
+        open_line_switch_line_indices=json.dumps(open_line_indices),
+        scope_matched_open_line_policy_applied=(
+            ref_mode == "scope_matched" and bool(open_line_indices)
+        ),
+        scope_matched_lines_deactivated_in_pp_reference=json.dumps(
+            sorted(lines_deactivated_in_pp_reference)
+        ),
+        pandapower_reference_active_line_count=pandapower_reference_active_line_count,
+        diffpf_active_line_count=diffpf_active_line_count,
         number_of_trafos_active=len(spec.trafos),
         number_of_shunts=len(spec.shunts),
         number_of_loads=int((net_pp.load["in_service"] == True).sum()),  # noqa: E712
@@ -906,12 +961,19 @@ def run_scenario(
 
     # 2. Build pandapower reference net and diffpf input net
     if ref_mode == "scope_matched":
-        net_pp_run = convert_gen_to_sgen(net_base)
+        net_pp_run = apply_scope_matched_open_line_policy(
+            convert_gen_to_sgen(net_base)
+        )
         net_diffpf_input = net_pp_run
-        notes = "gen converted to sgen(Q=0); strict comparison"
+        open_line_policy_indices = open_line_switch_line_indices(net_pp_run)
+        notes = (
+            "gen converted to sgen(Q=0); open line-switch lines disabled in "
+            "pandapower reference; strict comparison"
+        )
     else:  # original_pandapower
         net_pp_run = copy.deepcopy(net_base)
         net_diffpf_input = convert_gen_to_sgen(net_base)
+        open_line_policy_indices = []
         notes = "pp uses original PV gen; diffpf uses sgen(Q=0); contextual comparison"
 
     # 3. Build switch info from base net (topology is same for both modes)
@@ -959,7 +1021,7 @@ def run_scenario(
     )
     structure_row = _extract_structure_row(
         scenario_name, ref_mode, net_diffpf_input, spec,
-        bus_to_repr, disabled_lines, disabled_trafos,
+        bus_to_repr, disabled_lines, disabled_trafos, open_line_policy_indices,
     )
     summary_row = _build_summary_row(
         scenario_name, ref_mode, diffpf_sol, pp_sol,
@@ -1036,6 +1098,8 @@ def write_metadata(results_dir: Path, scenarios: list[str]) -> None:
         "reference_mode_explanation": {
             "scope_matched": (
                 "pandapower gen is replaced by sgen(P=gen.p_mw, Q=0). "
+                "Open line-switch lines are set out of service in the "
+                "pandapower reference to match diffpf's simplified topology. "
                 "Both pandapower and diffpf use the same PQ model. "
                 "Strict numerical comparison is valid."
             ),
@@ -1052,6 +1116,15 @@ def write_metadata(results_dir: Path, scenarios: list[str]) -> None:
             "damping": NEWTON_OPTIONS.damping,
         },
         "pandapower_runpp_options": PP_RUNPP_KWARGS,
+        "scope_matched_open_line_policy": {
+            "applies_to_reference_mode": "scope_matched",
+            "open_line_switch_filter": "net.switch.et == 'l' and closed == False",
+            "pandapower_action": "set affected net.line.in_service = False before runpp",
+            "reason": (
+                "diffpf removes open-line-switch lines from the active topology; "
+                "pandapower otherwise retains dangling line charging via auxiliary buses"
+            ),
+        },
         "init_strategy": INIT_STRATEGY,
         "init_strategy_description": (
             "HV buses (vn_kv >= 100 kV) initialised at slack angle. "
@@ -1164,6 +1237,17 @@ LV-Klemme verteilt. Der HV-Selbstadmittanzterm wird mit `tap * conj(tap)`
 transformiert; die Off-Diagonalterme verwenden die konjugierten komplexen
 Tap-Faktoren. Dadurch wird die Magnetisierung nicht mehr effektiv doppelt
 gezählt.
+
+## Scope-matched Open-Line-Policy
+
+Im `scope_matched`-Modus werden Leitungen, die von offenen Line-Switches
+betroffen sind, in der pandapower-Referenz vor `runpp()` vollstaendig
+`out_of_service` gesetzt. Grund: diffpf entfernt diese Leitungen im
+vereinfachten Topologiemodell ebenfalls vollstaendig. Damit wird vermieden,
+dass pandapower ueber interne Hilfsbusse weiterhin kleine Ladeeffekte offener
+Leitungen beruecksichtigt. Diese Anpassung betrifft nur den strikten
+Modellparitaetsvergleich; der `original_pandapower`-Kontextvergleich bleibt
+als pandapower-Originalmodell erhalten.
 
 ## Scope-matched Ergebnis nach der Korrektur
 
