@@ -123,9 +123,9 @@ FD_VS_FD_STEP_STABILITY_COLUMNS = (
 )
 
 FD_STABILITY_LABELS = {
-    "base:load_scale_mv_bus_2->vm_mv_bus_2_pu": "load scale -> |V| MV Bus 2",
-    "base:sgen_scale_static_generator->p_slack_mw": "sgen scale -> P_slack",
-    "base:shunt_q_scale->total_p_loss_mw": "shunt Q scale -> total P loss",
+    "base:load_scale_mv_bus_2->vm_mv_bus_2_pu": r"$\partial |V_2| / \partial \theta_\mathrm{load}$",
+    "base:sgen_scale_static_generator->p_slack_mw": r"$\partial P_\mathrm{slack} / \partial \theta_\mathrm{sgen}$",
+    "base:shunt_q_scale->total_p_loss_mw": r"$\partial P_\mathrm{loss} / \partial \theta_\mathrm{shunt}$",
 }
 
 
@@ -875,7 +875,10 @@ def plot_error_boxplot(
 
 def _curve_label(row: pd.Series) -> str:
     if "selected_gradient_id" in row and isinstance(row["selected_gradient_id"], str):
-        return row["selected_gradient_id"]
+        gid = row["selected_gradient_id"]
+        if gid in FD_STABILITY_LABELS:
+            return FD_STABILITY_LABELS[gid]
+        return gid
     parts = []
     for column in ("scenario", "input_parameter", "output_observable", "observable"):
         if column in row and pd.notna(row[column]):
@@ -1040,20 +1043,40 @@ def plot_fd_step_study_detailed(
         label = _curve_label(group.iloc[0]) if group_col == "selected_gradient_id" else str(group_name)
         ax.plot(group[step_col], y, marker="o", linewidth=1.5, label=label)
 
-    # O(h²) reference line: central FD truncation error scales as h²
-    _h_o2 = np.logspace(0, -6, 200)
-    _anc_h, _anc_y = 1e0, 1e-1
-    _y_o2 = _anc_y * (_h_o2 / _anc_h) ** 2
-    ax.plot(_h_o2, _y_o2, linestyle="--", color="dimgray",
+    # O(h²) reference: c = 3e-6, about half of sgen_scale (c_sgen≈5.85e-6), so the
+    # line runs slightly below the orange P_slack-sensitivity curve on the right side.
+    # Cuts off cleanly when y falls below 1e-14 (no flat floor at EPS_LOG).
+    _h_o2_full = np.logspace(0, -10, 400)
+    _anc_h, _anc_y = 1e-1, 3e-8   # → c = 3e-6
+    _y_o2_full = _anc_y * (_h_o2_full / _anc_h) ** 2
+    _mask_o2 = _y_o2_full >= 1e-14
+    ax.plot(_h_o2_full[_mask_o2], _y_o2_full[_mask_o2], linestyle="--", color="dimgray",
             linewidth=1.0, alpha=0.65, zorder=0)
-    ax.text(4e-1, _anc_y * (4e-1 / _anc_h) ** 2 * 3.0,
-            r"$O(h^2)$", color="dimgray", fontsize=8, ha="right", va="bottom")
+    # Label: left edge at x=6e-2, y=1e-9
+    ax.text(6e-2, 1e-9,
+            "Referenzsteigung\n$O(h^2)$",
+            color="dimgray", fontsize=6, ha="left", va="top")
+
+    # O(ε/h) reference: C=1.5e-15, anchored so the line sits just below the local
+    # minimum of the blue voltage-sensitivity curve at h≈5e-8 (y_line≈3e-8 vs data≈4.4e-8).
+    # Crosses O(h²) near h≈8e-4 (y≈1.9e-12, above the 1e-14 cutoff → crossing visible).
+    _C_round = 1.5e-15
+    _h_round_full = np.logspace(0, -10, 400)
+    _y_round_full = _C_round / _h_round_full
+    _mask_round = _y_round_full >= 1e-14
+    ax.plot(_h_round_full[_mask_round], _y_round_full[_mask_round], linestyle="-.", color="dimgray",
+            linewidth=1.0, alpha=0.65, zorder=0)
+    # Label: x=1e-8, y=1e-9
+    ax.text(1e-8, 1e-9,
+            "Referenzsteigung\n$O(\\varepsilon/h)$",
+            color="dimgray", fontsize=6, ha="left", va="top")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_title("AD-vs-FD step-size study")
-    ax.set_xlabel("FD step h")
-    ax.set_ylabel("Relative AD-vs-FD error")
+    ax.set_ylim(bottom=1e-15)
+    ax.set_title("Gradientenfehler in Abhängigkeit der FD-Schrittweite")
+    ax.set_xlabel("Schrittweite $h$")
+    ax.set_ylabel(r"Relativer Fehler $\epsilon_\mathrm{rel}$ (AD vs. FD)")
     ax.legend(fontsize=8)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
@@ -1090,15 +1113,14 @@ def build_fd_vs_fd_step_stability_detailed_figure(
         label = _fd_stability_label(str(group_id), group.iloc[0])
         ax.plot(group["fd_step_large"], y, marker="o", linewidth=1.5, label=label)
 
-    # O(h²) reference line: FD-vs-FD neighbour difference also scales as h²
-    # in the truncation-error-dominated region
-    _h_o2 = np.logspace(0, -6, 200)
-    _anc_h, _anc_y = 5e-1, 1e-3
+    # O(h²) reference line: anchored on load_scale gradient (h=1, fd_rel_change≈3.4e-4)
+    _h_o2 = np.logspace(0, -4, 200)
+    _anc_h, _anc_y = 1e0, 1.0e-3
     _y_o2 = _anc_y * (_h_o2 / _anc_h) ** 2
     ax.plot(_h_o2, _y_o2, linestyle="--", color="dimgray",
             linewidth=1.0, alpha=0.65, zorder=0)
-    ax.text(6e-1, _anc_y * (6e-1 / _anc_h) ** 2 * 3.0,
-            r"$O(h^2)$", color="dimgray", fontsize=8, ha="left", va="bottom")
+    ax.text(3e-1, _anc_y * (3e-1 / _anc_h) ** 2 * 3.5,
+            r"$O(h^2)$", color="dimgray", fontsize=8, ha="center", va="bottom")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
