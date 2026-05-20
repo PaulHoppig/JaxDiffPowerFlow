@@ -1,5 +1,114 @@
 # Changelog
 
+## 2026-05-20 - Experiment 4 groesseres NN-Surrogat mit LR-Decay und Fehlerhauptmetriken
+
+### Kurzbeschreibung
+- Experiment 4 wurde auf eine 4-fach groessere synthetische
+  Distillation-Hauptlauf-Konfiguration umgestellt:
+  `32768` Trainingspunkte, `8192` Validierungspunkte und `8192`
+  Evaluationspunkte.
+- Das JAX-only P-only-MLP nutzt weiterhin Full-Batch-Gradient-Descent, nun mit
+  nicht-zyklischem Cosine-Decay von `5e-2` auf `5e-4` ueber `4000`
+  Trainingsschritte.
+- Best-Validation-Checkpointing wurde ergaenzt. Die final exportierten
+  Surrogatfehler und der Power-Flow-Modellvergleich verwenden die Parameter
+  mit dem niedrigsten Validation-MSE.
+- Der Power-Flow-Modellvergleich wurde um zentrale absolute
+  Observable-Fehlermetriken gegen `analytic_pv_weather` erweitert.
+- Der Sensitivitaetsvergleich wurde um absolute Gradientenfehler, robuste
+  relative Gradientenfehler mit Nenner-Floor, Vorzeichenuebereinstimmung und
+  Magnitudenverhaeltnisse erweitert. Cosine Similarity bleibt nur als
+  Zusatzmetrik fuer Richtungsaehnlichkeit erhalten.
+
+### Geaenderte Dateien
+- `src/diffpf/models/pq_surrogate.py` - Default-Datensatzgroessen auf
+  `32768/8192/8192` gesetzt und LR-Schedule-Defaults ergaenzt.
+- `src/diffpf/models/__init__.py` - neue Exp.-4-Default-Konstanten exportiert.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` - Cosine-Decay,
+  Best-Validation-Checkpointing, neue PF-Observable-Fehlerartefakte,
+  neue Sensitivitaetsfehlerartefakte, erweiterte Metadata/README/Run-Summary.
+- `experiments/plot_exp04_training_figures.py` - neue Fig. 3 fuer die
+  exportierte Learning-Rate-Schedule.
+- `tests/test_pq_surrogate_model.py` - Tests fuer neue Default-Konfiguration.
+- `tests/test_exp04_modular_surrogate_outputs.py` - Tests fuer LR-Schedule,
+  Smoke-Konfiguration, neue Artefaktschemas und Fehleraggregationen.
+- `tests/test_exp04_plot_outputs.py` - Tests fuer die neue LR-Figur.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - Hauptlaufgroessen,
+  LR-Decay, Best-Checkpointing und neue Hauptmetriken dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.png/pdf`
+
+### Neue Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig03_learning_rate_schedule.png/pdf`
+
+### Ergebnisnotizen
+- Voller Exp.-4-Lauf erfolgreich mit Python 3.11:
+  `python experiments/exp04_modular_upstream_nn_surrogate.py`.
+- Alle drei Upstream-Modelle konvergierten in allen kompakten
+  Power-Flow-Vergleichsfaellen: `18/18` je Modell.
+- `surrogate_error_table` enthaelt `49152` Zeilen:
+  train `32768`, val `8192`, eval `8192`.
+- Best-Checkpoint: Schritt `4000`, Validation-MSE `8.478118983363279e-04`,
+  Validation-MAE `0.046857078471898586 MW`.
+- Finale Fehler am letzten Schritt sind identisch mit dem Best-Checkpoint:
+  Train-MSE `8.675546077813411e-04`, Val-MSE `8.478118983363279e-04`,
+  Train-MAE `0.047145536958641356 MW`, Val-MAE
+  `0.046857078471898586 MW`.
+- Eval-Split: P-MAE `0.046775376273178695 MW`, P-RMSE
+  `0.058538922866291296 MW`, maximale P-Abweichung
+  `0.2686258793470051 MW`.
+- Gegenueber dem vorherigen dokumentierten Hauptlauf
+  (Val-MSE ca. `0.001756`, Val-MAE ca. `0.06663 MW`) ist der neue Lauf
+  deutlich besser.
+- Der grosse Eval-Split wurde nur fuer Surrogatfehler genutzt. Power-Flow- und
+  Sensitivitaetsvergleiche blieben auf den bestehenden kompakten Wetterfaellen.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_pq_surrogate_model.py -q`
+  (`8 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (`13 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_plot_outputs.py -q`
+  (`15 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_pv_model.py -q`
+  (`16 passed`).
+- Optional ausgefuehrt:
+  `python -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (`27 passed`).
+
+### Bekannte Einschraenkungen
+- Das NN bleibt ein synthetisches Distillation-Surrogat und kein
+  Messdaten-Prognosemodell.
+- Das NN bleibt P-only; `Q = -0.25 * P` bleibt deterministisch gekoppelt.
+- Keine Aenderung am AC-Power-Flow-Kern, Residuum, Y-Bus, Solver,
+  impliziter Differentiation oder analytischen PV-Modell.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Sensitivitaetsfehler werden weiterhin auf den kompakten Exp.-4-Faellen
+  ausgewertet; der 8192er-Eval-Split wird nicht fuer massive PF-Solves genutzt.
+
 ## 2026-05-19 - Experiment 2 erneut ausgefuehrt nach Kern-/Modellierungsaenderungen
 
 ### Kurzbeschreibung

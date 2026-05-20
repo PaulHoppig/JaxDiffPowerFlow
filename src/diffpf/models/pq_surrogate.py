@@ -16,9 +16,13 @@ import jax.numpy as jnp
 
 from diffpf.models.pv import PV_BASE_P_MW, PV_Q_OVER_P, PVInjection
 
-DEFAULT_TRAIN_SAMPLES = 8192
-DEFAULT_VAL_SAMPLES = 2048
-DEFAULT_EVAL_SAMPLES = 2048
+DEFAULT_TRAIN_SAMPLES = 32768
+DEFAULT_VAL_SAMPLES = 8192
+DEFAULT_EVAL_SAMPLES = 8192
+DEFAULT_LEARNING_RATE_START = 5e-2
+DEFAULT_LEARNING_RATE_END = 5e-4
+DEFAULT_LR_SCHEDULE = "cosine_decay"
+DEFAULT_MAX_TRAIN_STEPS = 4000
 
 
 class MLPParams(NamedTuple):
@@ -44,8 +48,11 @@ class SurrogateTrainingConfig(NamedTuple):
     eval_samples: int = DEFAULT_EVAL_SAMPLES
     hidden_width: int = 8
     hidden_layers: int = 2
-    learning_rate: float = 0.03
-    max_train_steps: int = 1200
+    learning_rate: float = DEFAULT_LEARNING_RATE_START
+    learning_rate_start: float = DEFAULT_LEARNING_RATE_START
+    learning_rate_end: float = DEFAULT_LEARNING_RATE_END
+    lr_schedule: str = DEFAULT_LR_SCHEDULE
+    max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS
     log_every: int = 50
 
 

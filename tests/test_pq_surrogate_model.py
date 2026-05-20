@@ -9,7 +9,15 @@ import jax.numpy as jnp
 import numpy as np
 
 from diffpf.models.pq_surrogate import (
+    DEFAULT_EVAL_SAMPLES,
+    DEFAULT_LEARNING_RATE_END,
+    DEFAULT_LEARNING_RATE_START,
+    DEFAULT_LR_SCHEDULE,
+    DEFAULT_MAX_TRAIN_STEPS,
+    DEFAULT_TRAIN_SAMPLES,
+    DEFAULT_VAL_SAMPLES,
     DEFAULT_WEATHER_NORMALIZATION,
+    SurrogateTrainingConfig,
     count_mlp_parameters,
     init_mlp_params,
     neural_pq_injection_from_weather,
@@ -103,6 +111,18 @@ def test_parameter_count_stays_small():
     params = init_mlp_params(jax.random.PRNGKey(5))
 
     assert count_mlp_parameters(params) < 500
+
+
+def test_default_training_config_documents_full_exp04_run():
+    config = SurrogateTrainingConfig()
+
+    assert config.train_samples == DEFAULT_TRAIN_SAMPLES == 32768
+    assert config.val_samples == DEFAULT_VAL_SAMPLES == 8192
+    assert config.eval_samples == DEFAULT_EVAL_SAMPLES == 8192
+    assert config.learning_rate_start == DEFAULT_LEARNING_RATE_START == 5e-2
+    assert config.learning_rate_end == DEFAULT_LEARNING_RATE_END == 5e-4
+    assert config.lr_schedule == DEFAULT_LR_SCHEDULE == "cosine_decay"
+    assert config.max_train_steps == DEFAULT_MAX_TRAIN_STEPS == 4000
 
 
 def test_surrogate_module_does_not_import_pandapower():

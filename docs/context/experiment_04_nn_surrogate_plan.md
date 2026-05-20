@@ -44,9 +44,14 @@ als weitere Schnittstellenkontrolle, nicht als fachlich genaues PV-Modell.
 
 Das Hauptmodell ist ein P-only-MLP mit drei Eingaben, zwei versteckten Schichten
 der Breite 8, `tanh`-Aktivierungen und einer skalaren Ausgabe. Die Default-
-Konfiguration des Hauptlaufs verwendet 8192 Trainingspunkte, 2048
-Validierungspunkte und einen separaten 2048-Punkte-Evaluationssplit, einen
+Konfiguration des Hauptlaufs verwendet 32768 Trainingspunkte, 8192
+Validierungspunkte und einen separaten 8192-Punkte-Evaluationssplit, einen
 festen Seed und einfaches Full-Batch-Gradient-Descent in JAX.
+
+Das Training nutzt eine nicht-zyklische Cosine-Decay-Lernrate mit Startwert
+`5e-2`, Endwert `5e-4` und 4000 Trainingsschritten. Es werden die Parameter des
+besten Validation-MSE-Checkpoints fuer die finalen Surrogatfehler und den
+anschliessenden Power-Flow-Modellvergleich verwendet.
 
 Kleine Smoke-Test-Konfigurationen in den Tests duerfen weiterhin deutlich
 weniger Punkte verwenden. Diese Mini-Konfigurationen pruefen nur Import,
@@ -74,7 +79,7 @@ Der grosse `eval`-Split dient der statistischen Surrogatfehler-Auswertung. Die
 kleine feste Liste repraesentativer Wetterfaelle bleibt separat erhalten und
 wird fuer Power-Flow-Modellvergleich, AD-vs-FD-Spotchecks und
 Sensitivitaetsmuster genutzt. Dadurch wird nicht versehentlich ein
-2048-Punkte-Power-Flow-Vergleich ueber alle Modelle und Netzszenarien gestartet.
+8192-Punkte-Power-Flow-Vergleich ueber alle Modelle und Netzszenarien gestartet.
 
 ## Bewertungsartefakte
 
@@ -86,9 +91,13 @@ Wesentliche Artefakte sind:
 - `training_history.csv/json`,
 - `surrogate_error_table.csv/json`,
 - `model_comparison.csv/json`,
+- `pf_observable_error_table.csv/json`,
+- `pf_observable_error_summary.csv/json`,
 - `coupling_summary.csv/json`,
 - `gradient_success_table.csv/json`,
 - `sensitivity_pattern_summary.csv/json`,
+- `sensitivity_error_table.csv/json`,
+- `sensitivity_error_summary.csv/json`,
 - `run_summary.csv/json`,
 - `metadata.json`,
 - `README.md`.
@@ -100,7 +109,21 @@ Controller-, Q-Limit- oder PV-PQ-Umschaltlogik verwenden.
 `gradient_success_table` enthaelt repraesentative AD-vs-FD-Spotchecks fuer die
 Wetterinputs. `sensitivity_pattern_summary` vergleicht lokale
 End-to-End-Sensitivitaetsmuster zwischen analytischem Modell, NN-Surrogat und
-direkter Baseline.
+direkter Baseline. Cosine Similarity bleibt dort als Zusatzmetrik fuer
+Richtungsaehnlichkeit erhalten, ist aber nicht mehr die alleinige
+Hauptaussage.
+
+Die zentrale netzseitige Modellvergleichsaussage wird durch
+`pf_observable_error_table` und `pf_observable_error_summary` gestuetzt. Diese
+Tabellen vergleichen `nn_p_only_fixed_kappa` und `direct_pq_scale_baseline`
+gegen `analytic_pv_weather` mit signiertem Fehler, absolutem Fehler, RMSE und
+robustem relativen Fehler mit Nenner-Floor.
+
+Die zentrale Sensitivitaetsaussage wird durch `sensitivity_error_table` und
+`sensitivity_error_summary` gestuetzt. Diese Tabellen berichten absolute
+Gradientenfehler, relative Gradientenfehler mit Nenner-Floor,
+Vorzeichenuebereinstimmung und Magnitudenverhaeltnisse gegen
+`analytic_pv_weather`.
 
 ## Bewusste Vereinfachungen
 

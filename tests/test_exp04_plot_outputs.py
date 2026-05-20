@@ -27,7 +27,7 @@ def sample_history() -> pd.DataFrame:
             "val_mse": [1.2, 0.11, 0.02],
             "train_mae_mw": [2.0, 1.0, 0.5],
             "val_mae_mw": [2.1, 1.1, 0.6],
-            "learning_rate": [0.03, 0.03, 0.03],
+            "learning_rate": [0.05, 0.02, 0.0005],
         }
     )
 
@@ -37,6 +37,7 @@ def test_plot_module_is_importable(plot_module):
     assert callable(plot_module.load_training_history)
     assert callable(plot_module.detect_step_column)
     assert callable(plot_module.detect_loss_columns)
+    assert callable(plot_module.detect_learning_rate_column)
 
 
 def test_load_training_history_reads_existing_csv(plot_module):
@@ -63,6 +64,10 @@ def test_detect_mae_columns(plot_module, sample_history):
         "train_mae_mw",
         "val_mae_mw",
     )
+
+
+def test_detect_learning_rate_column(plot_module, sample_history):
+    assert plot_module.detect_learning_rate_column(sample_history) == "learning_rate"
 
 
 def test_validate_training_history_rejects_missing_loss_columns(
@@ -131,6 +136,24 @@ def test_training_mae_plot_writes_png_and_pdf(
     assert np.isfinite([final_train, final_val]).all()
 
 
+def test_learning_rate_plot_writes_png_and_pdf(
+    plot_module,
+    sample_history,
+    tmp_path: Path,
+):
+    result = plot_module.plot_learning_rate_schedule(sample_history, tmp_path)
+
+    assert result is not None
+    png_path, pdf_path, use_log_y, first_lr, final_lr = result
+    assert png_path.exists()
+    assert pdf_path.exists()
+    assert png_path.name == "fig03_learning_rate_schedule.png"
+    assert pdf_path.name == "fig03_learning_rate_schedule.pdf"
+    assert use_log_y
+    assert first_lr == pytest.approx(0.05)
+    assert final_lr == pytest.approx(0.0005)
+
+
 def test_generate_figures_from_existing_artifacts(plot_module, tmp_path: Path):
     outputs = plot_module.generate_figures(
         results_dir=plot_module.RESULTS_DIR,
@@ -142,6 +165,8 @@ def test_generate_figures_from_existing_artifacts(plot_module, tmp_path: Path):
     assert "fig01_training_loss_curve.pdf" in output_names
     assert "fig02_training_mae_curve.png" in output_names
     assert "fig02_training_mae_curve.pdf" in output_names
+    assert "fig03_learning_rate_schedule.png" in output_names
+    assert "fig03_learning_rate_schedule.pdf" in output_names
     assert "README.md" in output_names
     assert all(path.exists() for path in outputs)
 
@@ -162,12 +187,14 @@ def test_figures_readme_documents_scope(plot_module, sample_history, tmp_path: P
         tmp_path,
         loss_summary=(loss_log_y, final_train_loss, final_val_loss),
         mae_summary=(mae_log_y, final_train_mae, final_val_mae),
+        lr_summary=(True, 0.05, 0.0005),
     )
 
     text = readme_path.read_text(encoding="utf-8")
     assert "training_history.csv" in text
     assert "Final train MSE" in text
     assert "Final validation MSE" in text
+    assert "Learning-rate schedule" in text
     assert "does not start new power-flow solves" in text
     assert "does not retrain the NN surrogate" in text
 

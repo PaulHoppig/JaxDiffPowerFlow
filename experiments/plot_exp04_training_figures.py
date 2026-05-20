@@ -40,6 +40,7 @@ MAE_COLUMN_CANDIDATES = (
     ("train_mae", "val_mae"),
     ("training_mae", "validation_mae"),
 )
+LEARNING_RATE_COLUMN_CANDIDATES = ("learning_rate", "lr")
 
 
 def load_training_history(results_dir: Path = RESULTS_DIR) -> pd.DataFrame:
@@ -103,6 +104,15 @@ def detect_mae_columns(history: pd.DataFrame) -> tuple[str, str] | None:
         return _find_existing_pair(history, MAE_COLUMN_CANDIDATES, "MAE")
     except ValueError:
         return None
+
+
+def detect_learning_rate_column(history: pd.DataFrame) -> str | None:
+    """Return the learning-rate column if present."""
+
+    for column in LEARNING_RATE_COLUMN_CANDIDATES:
+        if column in history.columns:
+            return column
+    return None
 
 
 def _numeric_series(history: pd.DataFrame, column: str) -> pd.Series:
@@ -226,6 +236,54 @@ def plot_training_mae_curve(
     return png_path, pdf_path, use_log_y, final_train, final_val
 
 
+def plot_learning_rate_schedule(
+    history: pd.DataFrame,
+    figures_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path, bool, float, float] | None:
+    """Plot the exported learning-rate schedule when available."""
+
+    lr_column = detect_learning_rate_column(history)
+    if lr_column is None:
+        return None
+    step_column = detect_step_column(history)
+    frame = pd.DataFrame(
+        {
+            "step": _numeric_series(history, step_column),
+            "learning_rate": _numeric_series(history, lr_column),
+        }
+    ).dropna()
+    if frame.empty:
+        raise ValueError(f"No numeric rows remain for {step_column} and {lr_column}.")
+    frame = frame.sort_values("step")
+    use_log_y = should_use_log_y(frame["learning_rate"])
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.plot(
+        frame["step"],
+        frame["learning_rate"],
+        marker="o",
+        markersize=3.5,
+        linewidth=1.8,
+        label="Learning rate",
+    )
+    ax.set_title("Experiment 4: Learning-Rate Schedule", pad=12)
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("Learning rate")
+    if use_log_y:
+        ax.set_yscale("log")
+    ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
+    ax.legend(loc="best", frameon=True)
+    fig.tight_layout()
+    png_path, pdf_path = _save_figure(fig, "fig03_learning_rate_schedule", figures_dir)
+    return (
+        png_path,
+        pdf_path,
+        use_log_y,
+        float(frame["learning_rate"].iloc[0]),
+        float(frame["learning_rate"].iloc[-1]),
+    )
+
+
 def _save_figure(fig: plt.Figure, stem: str, figures_dir: Path) -> tuple[Path, Path]:
     figures_dir.mkdir(parents=True, exist_ok=True)
     png_path = figures_dir / f"{stem}.png"
@@ -244,6 +302,7 @@ def write_figures_readme(
     figures_dir: Path,
     loss_summary: tuple[bool, float, float],
     mae_summary: tuple[bool, float, float] | None = None,
+    lr_summary: tuple[bool, float, float] | None = None,
 ) -> Path:
     """Write a compact README for the Experiment 4 training-history figures."""
 
@@ -284,6 +343,24 @@ def write_figures_readme(
                 f"Final train MAE: `{final_train_mae:.8g}` MW.",
                 "",
                 f"Final validation MAE: `{final_val_mae:.8g}` MW.",
+            ]
+        )
+
+    if lr_summary is not None:
+        lr_log_y, first_lr, final_lr = lr_summary
+        lines.extend(
+            [
+                "",
+                "## Fig. 3 - Learning-rate schedule",
+                "",
+                "`fig03_learning_rate_schedule.png` and "
+                "`fig03_learning_rate_schedule.pdf` plot the learning rate "
+                "recorded in `training_history.csv`. The y-axis uses "
+                f"logarithmic scaling: {_log_scale_text(lr_log_y)}.",
+                "",
+                f"Initial exported learning rate: `{first_lr:.8g}`.",
+                "",
+                f"Final exported learning rate: `{final_lr:.8g}`.",
             ]
         )
 
@@ -329,10 +406,18 @@ def generate_figures(
         outputs.extend([mae_png, mae_pdf])
         mae_summary = (mae_log_y, final_train_mae, final_val_mae)
 
+    lr_result = plot_learning_rate_schedule(history, figures_dir)
+    lr_summary = None
+    if lr_result is not None:
+        lr_png, lr_pdf, lr_log_y, first_lr, final_lr = lr_result
+        outputs.extend([lr_png, lr_pdf])
+        lr_summary = (lr_log_y, first_lr, final_lr)
+
     readme_path = write_figures_readme(
         figures_dir,
         loss_summary=(loss_log_y, final_train_loss, final_val_loss),
         mae_summary=mae_summary,
+        lr_summary=lr_summary,
     )
     outputs.append(readme_path)
     return outputs

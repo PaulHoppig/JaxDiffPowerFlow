@@ -42,6 +42,10 @@ from diffpf.core.types import NetworkParams, PFState
 from diffpf.core.ybus import build_ybus
 from diffpf.models.pq_surrogate import (
     DEFAULT_EVAL_SAMPLES,
+    DEFAULT_LEARNING_RATE_END,
+    DEFAULT_LEARNING_RATE_START,
+    DEFAULT_LR_SCHEDULE,
+    DEFAULT_MAX_TRAIN_STEPS,
     DEFAULT_TRAIN_SAMPLES,
     DEFAULT_VAL_SAMPLES,
     DEFAULT_WEATHER_NORMALIZATION,
@@ -117,6 +121,7 @@ WEATHER_CASES: tuple[dict, ...] = (
     {"weather_case_id": "edge_training_high", "g_poa_wm2": 1200.0, "t_amb_c": 35.0, "wind_ms": 1.0},
 )
 FD_STEPS = {"g_poa_wm2": 1.0, "t_amb_c": 0.05, "wind_ms": 0.01}
+REL_ERROR_FLOOR = 1e-12
 
 TRAINING_DATASET_SUMMARY_COLUMNS: tuple[str, ...]
 TRAINING_HISTORY_COLUMNS: tuple[str, ...]
@@ -167,6 +172,8 @@ class SurrogateErrorRow:
     p_rel_error: float
     q_abs_error_mvar: float
     q_rel_error: float
+    p_rel_error_floor: float
+    q_rel_error_floor: float
 
 
 @dataclass(frozen=True)
@@ -217,6 +224,8 @@ class GradientSuccessRow:
     fd_gradient: float
     abs_error: float
     rel_error: float
+    ad_fd_abs_error: float
+    ad_fd_rel_error_floor: float
     is_finite_ad: bool
     is_finite_fd: bool
     passes_fd_check: bool
@@ -241,11 +250,96 @@ class SensitivityPatternSummaryRow:
 
 
 @dataclass(frozen=True)
+class PFObservableErrorRow:
+    candidate_model: str
+    reference_model: str
+    network_scenario: str
+    weather_case_id: str
+    observable: str
+    unit: str
+    reference_value: float
+    candidate_value: float
+    signed_error: float
+    abs_error: float
+    rel_error_floor: float
+    reference_abs_floor: float
+
+
+@dataclass(frozen=True)
+class PFObservableErrorSummaryRow:
+    candidate_model: str
+    observable: str
+    n: int
+    mean_abs_error: float
+    median_abs_error: float
+    max_abs_error: float
+    rmse: float
+    mean_rel_error_floor: float
+    max_rel_error_floor: float
+
+
+@dataclass(frozen=True)
+class SensitivityErrorRow:
+    candidate_model: str
+    reference_model: str
+    network_scenario: str
+    weather_case_id: str
+    observable: str
+    input_parameter: str
+    reference_gradient: float
+    candidate_gradient: float
+    signed_gradient_error: float
+    abs_gradient_error: float
+    rel_gradient_error_floor: float
+    sign_match: bool
+    abs_reference_gradient: float
+    abs_candidate_gradient: float
+    magnitude_ratio_abs: float
+
+
+@dataclass(frozen=True)
+class SensitivityErrorSummaryRow:
+    candidate_model: str
+    network_scenario: str
+    observable: str
+    input_parameter: str
+    n: int
+    mean_abs_gradient_error: float
+    median_abs_gradient_error: float
+    max_abs_gradient_error: float
+    rmse_gradient_error: float
+    mean_rel_gradient_error_floor: float
+    median_rel_gradient_error_floor: float
+    max_rel_gradient_error_floor: float
+    sign_match_rate: float
+    median_magnitude_ratio_abs: float
+    mean_cosine_similarity: float
+
+
+@dataclass(frozen=True)
+class TrainingDiagnostics:
+    best_step: int
+    best_val_mse: float
+    best_val_mae_mw: float
+    final_step: int
+    final_train_mse: float
+    final_val_mse: float
+    final_train_mae_mw: float
+    final_val_mae_mw: float
+
+
+@dataclass(frozen=True)
 class RunSummaryRow:
     model_name: str
     train_points: int
     val_points: int
     eval_points: int
+    best_step: int
+    best_val_mse: float
+    best_val_mae_mw: float
+    final_step: int
+    final_val_mse: float
+    final_val_mae_mw: float
     convergence_rate: float
     max_residual_norm: float
     max_iterations: int
@@ -260,6 +354,10 @@ MODEL_COMPARISON_COLUMNS = tuple(f.name for f in fields(ModelComparisonRow))
 COUPLING_SUMMARY_COLUMNS = tuple(f.name for f in fields(CouplingSummaryRow))
 GRADIENT_SUCCESS_COLUMNS = tuple(f.name for f in fields(GradientSuccessRow))
 SENSITIVITY_PATTERN_COLUMNS = tuple(f.name for f in fields(SensitivityPatternSummaryRow))
+PF_OBSERVABLE_ERROR_COLUMNS = tuple(f.name for f in fields(PFObservableErrorRow))
+PF_OBSERVABLE_ERROR_SUMMARY_COLUMNS = tuple(f.name for f in fields(PFObservableErrorSummaryRow))
+SENSITIVITY_ERROR_COLUMNS = tuple(f.name for f in fields(SensitivityErrorRow))
+SENSITIVITY_ERROR_SUMMARY_COLUMNS = tuple(f.name for f in fields(SensitivityErrorSummaryRow))
 RUN_SUMMARY_COLUMNS = tuple(f.name for f in fields(RunSummaryRow))
 
 REQUIRED_ARTIFACTS = (
@@ -279,6 +377,14 @@ REQUIRED_ARTIFACTS = (
     "gradient_success_table.json",
     "sensitivity_pattern_summary.csv",
     "sensitivity_pattern_summary.json",
+    "pf_observable_error_table.csv",
+    "pf_observable_error_table.json",
+    "pf_observable_error_summary.csv",
+    "pf_observable_error_summary.json",
+    "sensitivity_error_table.csv",
+    "sensitivity_error_table.json",
+    "sensitivity_error_summary.csv",
+    "sensitivity_error_summary.json",
     "run_summary.csv",
     "run_summary.json",
 )
@@ -341,10 +447,46 @@ def _loss(params: MLPParams, norm: WeatherInputNormalization, x, y_norm) -> jnp.
     return jnp.mean((pred_norm - y_norm) ** 2)
 
 
+def learning_rate_at_step(step: int, config: SurrogateTrainingConfig) -> float:
+    """Return the full-batch GD learning rate for one training step."""
+
+    if config.max_train_steps <= 0:
+        progress = 1.0
+    else:
+        progress = min(max(float(step) / float(config.max_train_steps), 0.0), 1.0)
+
+    start_lr = float(config.learning_rate_start)
+    if (
+        float(config.learning_rate) != DEFAULT_LEARNING_RATE_START
+        and float(config.learning_rate_start) == DEFAULT_LEARNING_RATE_START
+    ):
+        start_lr = float(config.learning_rate)
+    end_lr = float(config.learning_rate_end)
+
+    if config.lr_schedule == "constant":
+        return start_lr
+    if config.lr_schedule != "cosine_decay":
+        raise ValueError(f"Unsupported learning-rate schedule: {config.lr_schedule!r}")
+
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return end_lr + (start_lr - end_lr) * cosine
+
+
+def _mae_mw(
+    params: MLPParams,
+    norm: WeatherInputNormalization,
+    x: jnp.ndarray,
+    y_norm: jnp.ndarray,
+) -> jnp.ndarray:
+    return jnp.mean(jnp.abs(_predict_p_mw(params, norm, x) - y_norm * PV_BASE_P_MW))
+
+
 def train_surrogate(
     config: SurrogateTrainingConfig = SurrogateTrainingConfig(),
     norm: WeatherInputNormalization = DEFAULT_WEATHER_NORMALIZATION,
-) -> tuple[MLPParams, jnp.ndarray, jnp.ndarray, jnp.ndarray, list[TrainingHistoryRow]]:
+    *,
+    return_diagnostics: bool = False,
+):
     """Distill the analytical PV weather model into the small MLP."""
 
     key = jax.random.PRNGKey(config.seed)
@@ -362,30 +504,54 @@ def train_surrogate(
     value_and_grad = jax.jit(jax.value_and_grad(_loss))
 
     history: list[TrainingHistoryRow] = []
+    best_params = params
+    best_step = 0
+    best_val_mse = float("inf")
+    best_val_mae = float("inf")
     for step in range(config.max_train_steps + 1):
         train_mse, grads = value_and_grad(params, norm, train_x, train_y)
+        val_mse = _loss(params, norm, val_x, val_y)
+        val_mse_float = float(val_mse)
+        if val_mse_float < best_val_mse:
+            best_params = params
+            best_step = step
+            best_val_mse = val_mse_float
+            best_val_mae = float(_mae_mw(params, norm, val_x, val_y))
+        learning_rate = learning_rate_at_step(step, config)
         if step % config.log_every == 0 or step == config.max_train_steps:
-            val_mse = _loss(params, norm, val_x, val_y)
-            train_mae = jnp.mean(
-                jnp.abs(_predict_p_mw(params, norm, train_x) - train_y * PV_BASE_P_MW)
-            )
-            val_mae = jnp.mean(jnp.abs(_predict_p_mw(params, norm, val_x) - val_y * PV_BASE_P_MW))
+            train_mae = _mae_mw(params, norm, train_x, train_y)
+            val_mae = _mae_mw(params, norm, val_x, val_y)
             history.append(
                 TrainingHistoryRow(
                     step=step,
                     train_mse=float(train_mse),
-                    val_mse=float(val_mse),
+                    val_mse=val_mse_float,
                     train_mae_mw=float(train_mae),
                     val_mae_mw=float(val_mae),
-                    learning_rate=config.learning_rate,
+                    learning_rate=learning_rate,
                 )
             )
+        if step == config.max_train_steps:
+            break
         params = jax.tree_util.tree_map(
-            lambda p, g: p - config.learning_rate * g,
+            lambda p, g: p - learning_rate * g,
             params,
             grads,
         )
-    return params, train_x, val_x, eval_x, history
+    final = history[-1]
+    diagnostics = TrainingDiagnostics(
+        best_step=best_step,
+        best_val_mse=best_val_mse,
+        best_val_mae_mw=best_val_mae,
+        final_step=final.step,
+        final_train_mse=final.train_mse,
+        final_val_mse=final.val_mse,
+        final_train_mae_mw=final.train_mae_mw,
+        final_val_mae_mw=final.val_mae_mw,
+    )
+    if return_diagnostics:
+        return best_params, train_x, val_x, eval_x, history, diagnostics
+    return best_params, train_x, val_x, eval_x, history
 
 
 def _direct_pq_baseline(g_poa_wm2, _t_amb_c, _wind_ms) -> PVInjection:
@@ -565,9 +731,11 @@ def build_surrogate_error_rows(
                     q_ref_mvar=q_ref,
                     q_nn_mvar=q_nn,
                     p_abs_error_mw=p_abs,
-                    p_rel_error=p_abs / max(abs(float(p_ref[idx])), 1e-12),
+                    p_rel_error=p_abs / max(abs(float(p_ref[idx])), REL_ERROR_FLOOR),
                     q_abs_error_mvar=q_abs,
-                    q_rel_error=q_abs / max(abs(q_ref), 1e-12),
+                    q_rel_error=q_abs / max(abs(q_ref), REL_ERROR_FLOOR),
+                    p_rel_error_floor=p_abs / max(abs(float(p_ref[idx])), REL_ERROR_FLOOR),
+                    q_rel_error_floor=q_abs / max(abs(q_ref), REL_ERROR_FLOOR),
                 )
             )
     return rows
@@ -628,6 +796,7 @@ def build_model_comparison(
     params: MLPParams,
     norm: WeatherInputNormalization,
     config: SurrogateTrainingConfig,
+    training_diagnostics: TrainingDiagnostics,
 ) -> tuple[list[ModelComparisonRow], list[RunSummaryRow]]:
     scenarios = {
         name: build_scenario_base(name, load_factor)
@@ -678,11 +847,99 @@ def build_model_comparison(
                 train_points=config.train_samples,
                 val_points=config.val_samples,
                 eval_points=config.eval_samples,
+                best_step=training_diagnostics.best_step,
+                best_val_mse=training_diagnostics.best_val_mse,
+                best_val_mae_mw=training_diagnostics.best_val_mae_mw,
+                final_step=training_diagnostics.final_step,
+                final_val_mse=training_diagnostics.final_val_mse,
+                final_val_mae_mw=training_diagnostics.final_val_mae_mw,
                 convergence_rate=len(converged) / max(len(values), 1),
                 max_residual_norm=max(finite_residuals) if finite_residuals else float("nan"),
                 max_iterations=max((item[1] for item in converged), default=-1),
                 n_failed_solves=len(values) - len(converged),
                 n_total_solves=len(values),
+            )
+        )
+    return rows, summary_rows
+
+
+def build_pf_observable_error_tables(
+    comparison_rows: list[ModelComparisonRow],
+) -> tuple[list[PFObservableErrorRow], list[PFObservableErrorSummaryRow]]:
+    """Compare candidate PF observables against the analytical PV reference."""
+
+    reference_model = "analytic_pv_weather"
+    candidates = ("nn_p_only_fixed_kappa", "direct_pq_scale_baseline")
+    by_key = {
+        (
+            row.model_name,
+            row.network_scenario,
+            row.weather_case_id,
+            row.observable,
+        ): row
+        for row in comparison_rows
+    }
+    rows: list[PFObservableErrorRow] = []
+    for candidate in candidates:
+        for ref in comparison_rows:
+            if ref.model_name != reference_model:
+                continue
+            candidate_row = by_key.get(
+                (candidate, ref.network_scenario, ref.weather_case_id, ref.observable)
+            )
+            if candidate_row is None:
+                continue
+            signed_error = candidate_row.value - ref.value
+            abs_error = abs(signed_error)
+            reference_abs_floor = max(abs(ref.value), REL_ERROR_FLOOR)
+            rows.append(
+                PFObservableErrorRow(
+                    candidate_model=candidate,
+                    reference_model=reference_model,
+                    network_scenario=ref.network_scenario,
+                    weather_case_id=ref.weather_case_id,
+                    observable=ref.observable,
+                    unit=ref.unit,
+                    reference_value=ref.value,
+                    candidate_value=candidate_row.value,
+                    signed_error=signed_error,
+                    abs_error=abs_error,
+                    rel_error_floor=abs_error / reference_abs_floor,
+                    reference_abs_floor=reference_abs_floor,
+                )
+            )
+
+    summary_rows: list[PFObservableErrorSummaryRow] = []
+    groups: dict[tuple[str, str], list[PFObservableErrorRow]] = {}
+    for row in rows:
+        groups.setdefault((row.candidate_model, row.observable), []).append(row)
+    for (candidate, observable), group in groups.items():
+        abs_errors = np.asarray([row.abs_error for row in group], dtype=float)
+        signed_errors = np.asarray([row.signed_error for row in group], dtype=float)
+        rel_errors = np.asarray([row.rel_error_floor for row in group], dtype=float)
+        mask = np.isfinite(abs_errors) & np.isfinite(signed_errors) & np.isfinite(rel_errors)
+        abs_errors = abs_errors[mask]
+        signed_errors = signed_errors[mask]
+        rel_errors = rel_errors[mask]
+        summary_rows.append(
+            PFObservableErrorSummaryRow(
+                candidate_model=candidate,
+                observable=observable,
+                n=int(abs_errors.size),
+                mean_abs_error=float(np.mean(abs_errors)) if abs_errors.size else float("nan"),
+                median_abs_error=float(np.median(abs_errors)) if abs_errors.size else float("nan"),
+                max_abs_error=float(np.max(abs_errors)) if abs_errors.size else float("nan"),
+                rmse=(
+                    float(np.sqrt(np.mean(signed_errors**2)))
+                    if signed_errors.size
+                    else float("nan")
+                ),
+                mean_rel_error_floor=(
+                    float(np.mean(rel_errors)) if rel_errors.size else float("nan")
+                ),
+                max_rel_error_floor=(
+                    float(np.max(rel_errors)) if rel_errors.size else float("nan")
+                ),
             )
         )
     return rows, summary_rows
@@ -751,6 +1008,9 @@ def build_gradient_success_table(
             is_fd = math.isfinite(fd_grad)
             abs_error = abs(ad_grad - fd_grad) if is_ad and is_fd else float("nan")
             rel_error = _robust_rel_error(ad_grad, fd_grad) if is_ad and is_fd else float("nan")
+            rel_error_floor = (
+                abs_error / max(abs(fd_grad), REL_ERROR_FLOOR) if is_ad and is_fd else float("nan")
+            )
             rows.append(
                 GradientSuccessRow(
                     model_name=model_name,
@@ -762,6 +1022,8 @@ def build_gradient_success_table(
                     fd_gradient=fd_grad,
                     abs_error=abs_error,
                     rel_error=rel_error,
+                    ad_fd_abs_error=abs_error,
+                    ad_fd_rel_error_floor=rel_error_floor,
                     is_finite_ad=is_ad,
                     is_finite_fd=is_fd,
                     passes_fd_check=bool(is_ad and is_fd and rel_error < 5e-3),
@@ -843,6 +1105,154 @@ def build_sensitivity_pattern_summary(
     return rows
 
 
+def build_sensitivity_error_tables(
+    params: MLPParams,
+    norm: WeatherInputNormalization,
+) -> tuple[list[SensitivityErrorRow], list[SensitivityErrorSummaryRow]]:
+    """Build detailed absolute sensitivity-error metrics against the reference."""
+
+    scenario = build_scenario_base("base", 1.0)
+    gradients: dict[tuple[str, str, str, str], float] = {}
+    for model_name in UPSTREAM_MODELS:
+        for obs_name in PATTERN_OBSERVABLES:
+            fn = make_observable_fn(scenario, model_name, params, norm, obs_name)
+            for weather in WEATHER_CASES:
+                try:
+                    d_g, d_t, d_w = jax.grad(fn, argnums=(0, 1, 2))(
+                        jnp.asarray(weather["g_poa_wm2"], dtype=jnp.float64),
+                        jnp.asarray(weather["t_amb_c"], dtype=jnp.float64),
+                        jnp.asarray(weather["wind_ms"], dtype=jnp.float64),
+                    )
+                    values = {
+                        "g_poa_wm2": float(d_g),
+                        "t_amb_c": float(d_t),
+                        "wind_ms": float(d_w),
+                    }
+                except Exception:
+                    values = {name: float("nan") for name, _ in WEATHER_INPUT_SPECS}
+                for input_name, _ in WEATHER_INPUT_SPECS:
+                    gradients[
+                        (model_name, weather["weather_case_id"], obs_name, input_name)
+                    ] = values[input_name]
+
+    reference_model = "analytic_pv_weather"
+    candidates = ("nn_p_only_fixed_kappa", "direct_pq_scale_baseline")
+    rows: list[SensitivityErrorRow] = []
+    for candidate in candidates:
+        for weather in WEATHER_CASES:
+            for obs_name in PATTERN_OBSERVABLES:
+                for input_name, _ in WEATHER_INPUT_SPECS:
+                    ref_grad = gradients[
+                        (reference_model, weather["weather_case_id"], obs_name, input_name)
+                    ]
+                    cand_grad = gradients[
+                        (candidate, weather["weather_case_id"], obs_name, input_name)
+                    ]
+                    signed_error = cand_grad - ref_grad
+                    abs_error = abs(signed_error)
+                    abs_ref = abs(ref_grad)
+                    abs_cand = abs(cand_grad)
+                    denom = max(abs_ref, REL_ERROR_FLOOR)
+                    rows.append(
+                        SensitivityErrorRow(
+                            candidate_model=candidate,
+                            reference_model=reference_model,
+                            network_scenario="base",
+                            weather_case_id=weather["weather_case_id"],
+                            observable=obs_name,
+                            input_parameter=input_name,
+                            reference_gradient=ref_grad,
+                            candidate_gradient=cand_grad,
+                            signed_gradient_error=signed_error,
+                            abs_gradient_error=abs_error,
+                            rel_gradient_error_floor=abs_error / denom,
+                            sign_match=bool(np.sign(ref_grad) == np.sign(cand_grad)),
+                            abs_reference_gradient=abs_ref,
+                            abs_candidate_gradient=abs_cand,
+                            magnitude_ratio_abs=abs_cand / denom,
+                        )
+                    )
+
+    return rows, summarize_sensitivity_error_rows(rows)
+
+
+def summarize_sensitivity_error_rows(
+    rows: list[SensitivityErrorRow],
+) -> list[SensitivityErrorSummaryRow]:
+    """Aggregate detailed sensitivity-error rows into the exported summary."""
+
+    summary_rows: list[SensitivityErrorSummaryRow] = []
+    groups: dict[tuple[str, str, str, str], list[SensitivityErrorRow]] = {}
+    for row in rows:
+        groups.setdefault(
+            (row.candidate_model, row.network_scenario, row.observable, row.input_parameter),
+            [],
+        ).append(row)
+    for (candidate, scenario_name, observable, input_name), group in groups.items():
+        signed = np.asarray([row.signed_gradient_error for row in group], dtype=float)
+        abs_errors = np.asarray([row.abs_gradient_error for row in group], dtype=float)
+        rel_errors = np.asarray([row.rel_gradient_error_floor for row in group], dtype=float)
+        sign_matches = np.asarray([row.sign_match for row in group], dtype=bool)
+        ratios = np.asarray([row.magnitude_ratio_abs for row in group], dtype=float)
+        ref = np.asarray([row.reference_gradient for row in group], dtype=float)
+        cand = np.asarray([row.candidate_gradient for row in group], dtype=float)
+        mask = (
+            np.isfinite(signed)
+            & np.isfinite(abs_errors)
+            & np.isfinite(rel_errors)
+            & np.isfinite(ratios)
+            & np.isfinite(ref)
+            & np.isfinite(cand)
+        )
+        signed = signed[mask]
+        abs_errors = abs_errors[mask]
+        rel_errors = rel_errors[mask]
+        sign_matches = sign_matches[mask]
+        ratios = ratios[mask]
+        ref = ref[mask]
+        cand = cand[mask]
+        summary_rows.append(
+            SensitivityErrorSummaryRow(
+                candidate_model=candidate,
+                network_scenario=scenario_name,
+                observable=observable,
+                input_parameter=input_name,
+                n=int(abs_errors.size),
+                mean_abs_gradient_error=(
+                    float(np.mean(abs_errors)) if abs_errors.size else float("nan")
+                ),
+                median_abs_gradient_error=(
+                    float(np.median(abs_errors)) if abs_errors.size else float("nan")
+                ),
+                max_abs_gradient_error=(
+                    float(np.max(abs_errors)) if abs_errors.size else float("nan")
+                ),
+                rmse_gradient_error=(
+                    float(np.sqrt(np.mean(signed**2))) if signed.size else float("nan")
+                ),
+                mean_rel_gradient_error_floor=(
+                    float(np.mean(rel_errors)) if rel_errors.size else float("nan")
+                ),
+                median_rel_gradient_error_floor=(
+                    float(np.median(rel_errors)) if rel_errors.size else float("nan")
+                ),
+                max_rel_gradient_error_floor=(
+                    float(np.max(rel_errors)) if rel_errors.size else float("nan")
+                ),
+                sign_match_rate=(
+                    float(np.mean(sign_matches)) if sign_matches.size else float("nan")
+                ),
+                median_magnitude_ratio_abs=(
+                    float(np.median(ratios)) if ratios.size else float("nan")
+                ),
+                mean_cosine_similarity=(
+                    _cosine_similarity(ref, cand) if ref.size else float("nan")
+                ),
+            )
+        )
+    return summary_rows
+
+
 def _to_native(obj):
     if isinstance(obj, dict):
         return {key: _to_native(value) for key, value in obj.items()}
@@ -883,6 +1293,7 @@ def write_metadata(
     results_dir: Path,
     config: SurrogateTrainingConfig,
     params: MLPParams,
+    training_diagnostics: TrainingDiagnostics,
 ) -> None:
     meta = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -894,6 +1305,16 @@ def write_metadata(
         "replaced_element": PV_COUPLING_SGEN_NAME,
         "upstream_models": list(UPSTREAM_MODELS),
         "training_config": config._asdict(),
+        "learning_rate_schedule": {
+            "schedule": config.lr_schedule,
+            "start": learning_rate_at_step(0, config),
+            "end": learning_rate_at_step(config.max_train_steps, config),
+            "configured_start": config.learning_rate_start,
+            "configured_end": config.learning_rate_end,
+            "max_train_steps": config.max_train_steps,
+            "cyclic": False,
+        },
+        "best_validation_checkpoint": asdict(training_diagnostics),
         "dataset_sizes": {
             "train_points": config.train_samples,
             "val_points": config.val_samples,
@@ -925,7 +1346,7 @@ def write_metadata(
             "q_coupling": "Q = -0.25 * P",
         },
         "evaluation_split_note": (
-            "The eval split is a 2048-point synthetic surrogate-error dataset. "
+            "The eval split is an 8192-point synthetic surrogate-error dataset. "
             "The compact WEATHER_CASES list is kept for power-flow, AD-vs-FD, "
             "and sensitivity-pattern comparisons."
         ),
@@ -942,6 +1363,11 @@ def write_metadata(
             "The neural model is a distillation surrogate, not a measured-data forecast model.",
             "No controller logic, no Q limits, no PV-to-PQ switching.",
             "All upstream models use the same inject_pv_at_bus adapter and unchanged PF core.",
+        ],
+        "primary_metrics": [
+            "PF observable absolute error and floor-relative error vs analytic_pv_weather.",
+            "Sensitivity absolute gradient error, floor-relative gradient error, sign match, and magnitude ratio vs analytic_pv_weather.",
+            "Cosine similarity is retained only as an auxiliary direction metric.",
         ],
     }
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -961,9 +1387,9 @@ PV-to-PQ switching are used. The numerical power-flow core is unchanged.
 
 ## Distillation dataset
 
-The default full Experiment 4 run trains the NN surrogate on 8192 synthetic
-weather points, validates on 2048 points, and evaluates surrogate error on a
-separate 2048-point eval split. The fixed weather ranges are:
+The default full Experiment 4 run trains the NN surrogate on 32768 synthetic
+weather points, validates on 8192 points, and evaluates surrogate error on a
+separate 8192-point eval split. The fixed weather ranges are:
 
 - `g_poa_wm2`: 0 to 1200 W/m^2
 - `t_amb_c`: -10 to 45 degC
@@ -979,9 +1405,14 @@ The MLP has three inputs, two hidden layers of width 8 with `tanh`
 activations, and one scalar normalized active-power output. Reactive power is
 not learned: it remains deterministically coupled as `Q = -0.25 * P`.
 
+Training uses full-batch gradient descent in JAX with a non-cyclic
+`cosine_decay` learning-rate schedule from `5e-2` to `5e-4` over the configured
+training steps. The exported comparison uses the best validation checkpoint
+rather than blindly using the last parameter vector.
+
 The compact weather-case list used for `model_comparison`,
 `gradient_success_table`, and `sensitivity_pattern_summary` remains separate
-from the 2048-point eval split. This keeps the power-flow and gradient
+from the 8192-point eval split. This keeps the power-flow and gradient
 comparisons intentionally small.
 
 ## Main artifacts
@@ -992,7 +1423,16 @@ comparisons intentionally small.
 - `model_comparison.csv/json`: solved observables for all upstream models.
 - `coupling_summary.csv/json`: interface evidence for the modularity claim.
 - `gradient_success_table.csv/json`: representative AD-vs-FD spot checks.
-- `sensitivity_pattern_summary.csv/json`: gradient-pattern comparisons.
+- `pf_observable_error_table.csv/json`: absolute PF observable errors versus
+  `analytic_pv_weather`.
+- `pf_observable_error_summary.csv/json`: PF error aggregates by model and
+  observable.
+- `sensitivity_pattern_summary.csv/json`: gradient-pattern comparisons with
+  cosine similarity retained as an auxiliary metric.
+- `sensitivity_error_table.csv/json`: absolute and floor-relative sensitivity
+  errors, sign matches, and magnitude ratios versus `analytic_pv_weather`.
+- `sensitivity_error_summary.csv/json`: sensitivity error aggregates by model,
+  observable, and weather input.
 - `run_summary.csv/json`: convergence summary by upstream model.
 """
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -1008,9 +1448,14 @@ def export_all(
     coupling_rows: list[CouplingSummaryRow],
     gradient_rows: list[GradientSuccessRow],
     pattern_rows: list[SensitivityPatternSummaryRow],
+    pf_error_rows: list[PFObservableErrorRow],
+    pf_error_summary_rows: list[PFObservableErrorSummaryRow],
+    sensitivity_error_rows: list[SensitivityErrorRow],
+    sensitivity_error_summary_rows: list[SensitivityErrorSummaryRow],
     summary_rows: list[RunSummaryRow],
     config: SurrogateTrainingConfig,
     params: MLPParams,
+    training_diagnostics: TrainingDiagnostics,
 ) -> None:
     _write_csv(
         results_dir / "training_dataset_summary.csv",
@@ -1034,9 +1479,33 @@ def export_all(
         SENSITIVITY_PATTERN_COLUMNS,
     )
     _write_json(results_dir / "sensitivity_pattern_summary.json", pattern_rows)
+    _write_csv(
+        results_dir / "pf_observable_error_table.csv",
+        pf_error_rows,
+        PF_OBSERVABLE_ERROR_COLUMNS,
+    )
+    _write_json(results_dir / "pf_observable_error_table.json", pf_error_rows)
+    _write_csv(
+        results_dir / "pf_observable_error_summary.csv",
+        pf_error_summary_rows,
+        PF_OBSERVABLE_ERROR_SUMMARY_COLUMNS,
+    )
+    _write_json(results_dir / "pf_observable_error_summary.json", pf_error_summary_rows)
+    _write_csv(
+        results_dir / "sensitivity_error_table.csv",
+        sensitivity_error_rows,
+        SENSITIVITY_ERROR_COLUMNS,
+    )
+    _write_json(results_dir / "sensitivity_error_table.json", sensitivity_error_rows)
+    _write_csv(
+        results_dir / "sensitivity_error_summary.csv",
+        sensitivity_error_summary_rows,
+        SENSITIVITY_ERROR_SUMMARY_COLUMNS,
+    )
+    _write_json(results_dir / "sensitivity_error_summary.json", sensitivity_error_summary_rows)
     _write_csv(results_dir / "run_summary.csv", summary_rows, RUN_SUMMARY_COLUMNS)
     _write_json(results_dir / "run_summary.json", summary_rows)
-    write_metadata(results_dir, config, params)
+    write_metadata(results_dir, config, params, training_diagnostics)
     write_readme(results_dir)
 
 
@@ -1050,21 +1519,40 @@ def run_experiment(
     list[CouplingSummaryRow],
     list[GradientSuccessRow],
     list[SensitivityPatternSummaryRow],
+    list[PFObservableErrorRow],
+    list[PFObservableErrorSummaryRow],
+    list[SensitivityErrorRow],
+    list[SensitivityErrorSummaryRow],
     list[RunSummaryRow],
     MLPParams,
+    TrainingDiagnostics,
 ]:
     norm = DEFAULT_WEATHER_NORMALIZATION
-    params, train_x, val_x, eval_x, history_rows = train_surrogate(config, norm)
+    params, train_x, val_x, eval_x, history_rows, training_diagnostics = train_surrogate(
+        config,
+        norm,
+        return_diagnostics=True,
+    )
     dataset_rows = [
         summarize_dataset("train", train_x),
         summarize_dataset("val", val_x),
         summarize_dataset("eval", eval_x),
     ]
     error_rows = build_surrogate_error_rows(params, norm, train_x, val_x, eval_x)
-    comparison_rows, summary_rows = build_model_comparison(params, norm, config)
+    comparison_rows, summary_rows = build_model_comparison(
+        params,
+        norm,
+        config,
+        training_diagnostics,
+    )
+    pf_error_rows, pf_error_summary_rows = build_pf_observable_error_tables(comparison_rows)
     coupling_rows = build_coupling_summary()
     gradient_rows = build_gradient_success_table(params, norm)
     pattern_rows = build_sensitivity_pattern_summary(params, norm)
+    sensitivity_error_rows, sensitivity_error_summary_rows = build_sensitivity_error_tables(
+        params,
+        norm,
+    )
     return (
         dataset_rows,
         history_rows,
@@ -1073,8 +1561,13 @@ def run_experiment(
         coupling_rows,
         gradient_rows,
         pattern_rows,
+        pf_error_rows,
+        pf_error_summary_rows,
+        sensitivity_error_rows,
+        sensitivity_error_summary_rows,
         summary_rows,
         params,
+        training_diagnostics,
     )
 
 
@@ -1092,8 +1585,13 @@ def main() -> None:
         coupling_rows,
         gradient_rows,
         pattern_rows,
+        pf_error_rows,
+        pf_error_summary_rows,
+        sensitivity_error_rows,
+        sensitivity_error_summary_rows,
         summary_rows,
         params,
+        training_diagnostics,
     ) = run_experiment(config)
     export_all(
         RESULTS_DIR,
@@ -1104,9 +1602,14 @@ def main() -> None:
         coupling_rows,
         gradient_rows,
         pattern_rows,
+        pf_error_rows,
+        pf_error_summary_rows,
+        sensitivity_error_rows,
+        sensitivity_error_summary_rows,
         summary_rows,
         config,
         params,
+        training_diagnostics,
     )
     print("\nRun summary:")
     for row in summary_rows:
