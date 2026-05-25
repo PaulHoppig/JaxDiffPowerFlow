@@ -26,8 +26,16 @@ def test_default_training_config_uses_full_exp04_dataset_sizes(exp_module):
     assert config.train_samples == 32768
     assert config.val_samples == 8192
     assert config.eval_samples == 8192
-    assert config.max_train_steps == 4000
-    assert config.lr_schedule == "cosine_decay"
+    assert config.learning_rate_start == pytest.approx(8e-2)
+    assert config.learning_rate_end == pytest.approx(1e-4)
+    assert config.max_train_steps == 8000
+    assert config.lr_schedule == "cosine_warm_restarts_decay"
+    assert config.initial_schedule == "cosine_decay"
+    assert config.hidden_width == 16
+    assert config.hidden_layers == 2
+    assert config.warm_restart_enabled is True
+    assert config.base_train_steps == 8000
+    assert config.finetune_steps == 8000
 
 
 def test_required_artifact_names_are_defined(exp_module):
@@ -42,6 +50,8 @@ def test_required_artifact_names_are_defined(exp_module):
     assert "pf_observable_error_summary.csv" in required
     assert "sensitivity_error_table.csv" in required
     assert "sensitivity_error_summary.csv" in required
+    assert "training_improvement_summary.csv" in required
+    assert "architecture_comparison_summary.csv" in required
 
 
 def test_coupling_summary_columns_answer_research_question(exp_module):
@@ -105,6 +115,21 @@ def test_training_dataset_summary_schema_exists(exp_module):
         assert name in exp_module.TRAINING_DATASET_SUMMARY_COLUMNS
 
 
+def test_training_history_schema_documents_two_phase_training(exp_module):
+    for name in [
+        "step",
+        "global_step",
+        "phase",
+        "phase_step",
+        "cycle_id",
+        "learning_rate",
+        "is_best_checkpoint",
+        "hidden_width",
+        "parameter_count",
+    ]:
+        assert name in exp_module.TRAINING_HISTORY_COLUMNS
+
+
 def test_mini_training_run_is_possible(exp_module):
     config = exp_module.SurrogateTrainingConfig(
         seed=7,
@@ -114,6 +139,8 @@ def test_mini_training_run_is_possible(exp_module):
         hidden_width=4,
         hidden_layers=1,
         learning_rate=0.02,
+        lr_schedule="cosine_decay",
+        warm_restart_enabled=False,
         max_train_steps=3,
         log_every=1,
     )
@@ -127,18 +154,169 @@ def test_mini_training_run_is_possible(exp_module):
     assert len(history) >= 2
     assert all(row.train_mse >= 0.0 for row in history)
     assert len({row.learning_rate for row in history}) > 1
+    assert history[0].learning_rate > history[-1].learning_rate
+    assert all(row.phase == "base" for row in history)
+    assert all(row.global_step == row.step for row in history)
 
 
 def test_cosine_decay_learning_rate_has_expected_endpoints(exp_module):
-    config = exp_module.SurrogateTrainingConfig(max_train_steps=10)
+    config = exp_module.SurrogateTrainingConfig(
+        lr_schedule="cosine_decay",
+        max_train_steps=10,
+    )
 
     first = exp_module.learning_rate_at_step(0, config)
     middle = exp_module.learning_rate_at_step(5, config)
     last = exp_module.learning_rate_at_step(10, config)
 
-    assert first == pytest.approx(5e-2)
-    assert last == pytest.approx(5e-4)
+    assert first == pytest.approx(8e-2)
+    assert last == pytest.approx(1e-4)
     assert first > middle > last
+
+
+def test_warm_restart_learning_rate_has_expected_cycle_boundaries(exp_module):
+    config = exp_module.SurrogateTrainingConfig()
+
+    assert exp_module.learning_rate_at_step(0, config) == pytest.approx(2e-2)
+    assert exp_module.learning_rate_at_step(2000, config) == pytest.approx(1e-2)
+    assert exp_module.learning_rate_at_step(4000, config) == pytest.approx(5e-3)
+    assert exp_module.learning_rate_at_step(6000, config) == pytest.approx(2e-3)
+    assert exp_module.learning_rate_at_step(8000, config) == pytest.approx(5e-5)
+
+    cycle_starts = [
+        exp_module.learning_rate_at_step(step, config)
+        for step in (0, 2000, 4000, 6000)
+    ]
+    assert cycle_starts == sorted(cycle_starts, reverse=True)
+    assert exp_module.learning_rate_at_step(1999, config) < cycle_starts[0]
+    assert exp_module.learning_rate_at_step(2000, config) > exp_module.learning_rate_at_step(
+        1999,
+        config,
+    )
+
+
+def test_training_improvement_summary_compares_current_reference(exp_module):
+    config = exp_module.SurrogateTrainingConfig()
+    diagnostics = exp_module.TrainingDiagnostics(
+        best_phase="warm_restart_finetune",
+        best_cycle_id=2,
+        best_global_step=10000,
+        best_step=8000,
+        best_val_mse=2.0e-4,
+        best_val_mae_mw=0.02,
+        final_phase="warm_restart_finetune",
+        final_global_step=16000,
+        final_step=8000,
+        final_train_mse=4.1e-4,
+        final_val_mse=4.0e-4,
+        final_train_mae_mw=0.021,
+        final_val_mae_mw=0.02,
+    )
+    rows = [
+        exp_module.SurrogateErrorRow(
+            split="eval",
+            case_id="eval_0000",
+            g_poa_wm2=800.0,
+            t_amb_c=25.0,
+            wind_ms=2.0,
+            p_ref_mw=1.8,
+            p_nn_mw=1.7,
+            q_ref_mvar=-0.45,
+            q_nn_mvar=-0.425,
+            p_abs_error_mw=0.1,
+            p_rel_error=0.05,
+            q_abs_error_mvar=0.025,
+            q_rel_error=0.05,
+            p_rel_error_floor=0.05,
+            q_rel_error_floor=0.05,
+        ),
+        exp_module.SurrogateErrorRow(
+            split="eval",
+            case_id="eval_0001",
+            g_poa_wm2=900.0,
+            t_amb_c=25.0,
+            wind_ms=2.0,
+            p_ref_mw=2.0,
+            p_nn_mw=1.8,
+            q_ref_mvar=-0.5,
+            q_nn_mvar=-0.45,
+            p_abs_error_mw=0.2,
+            p_rel_error=0.1,
+            q_abs_error_mvar=0.05,
+            q_rel_error=0.1,
+            p_rel_error_floor=0.1,
+            q_rel_error_floor=0.1,
+        ),
+    ]
+
+    summary = exp_module.build_training_improvement_summary(rows, config, diagnostics)
+
+    assert len(summary) == 1
+    assert summary[0].reference_val_mse == pytest.approx(2.565834826e-04)
+    assert summary[0].new_best_val_mse == pytest.approx(2.0e-4)
+    assert summary[0].new_eval_p_mae_mw == pytest.approx(0.15)
+    assert summary[0].new_eval_p_rmse_mw == pytest.approx((0.025) ** 0.5)
+    assert summary[0].relative_improvement_val_mse > 0.0
+    assert summary[0].improved_over_reference is True
+    assert summary[0].best_phase == "warm_restart_finetune"
+    assert summary[0].best_cycle_id == 2
+    assert summary[0].best_global_step == 10000
+
+
+def test_architecture_comparison_summary_compares_width16_against_width8(exp_module):
+    config = exp_module.SurrogateTrainingConfig()
+    params = exp_module.init_mlp_params(exp_module.jax.random.PRNGKey(0))
+    diagnostics = exp_module.TrainingDiagnostics(
+        best_phase="warm_restart_finetune",
+        best_cycle_id=4,
+        best_global_step=16000,
+        best_step=8000,
+        best_val_mse=2.0e-4,
+        best_val_mae_mw=0.02,
+        final_phase="warm_restart_finetune",
+        final_global_step=16000,
+        final_step=8000,
+        final_train_mse=2.1e-4,
+        final_val_mse=2.0e-4,
+        final_train_mae_mw=0.021,
+        final_val_mae_mw=0.02,
+    )
+    rows = [
+        exp_module.SurrogateErrorRow(
+            split="eval",
+            case_id="eval_0000",
+            g_poa_wm2=800.0,
+            t_amb_c=25.0,
+            wind_ms=2.0,
+            p_ref_mw=1.8,
+            p_nn_mw=1.7,
+            q_ref_mvar=-0.45,
+            q_nn_mvar=-0.425,
+            p_abs_error_mw=0.1,
+            p_rel_error=0.05,
+            q_abs_error_mvar=0.025,
+            q_rel_error=0.05,
+            p_rel_error_floor=0.05,
+            q_rel_error_floor=0.05,
+        )
+    ]
+
+    summary = exp_module.build_architecture_comparison_summary(
+        rows,
+        config,
+        params,
+        diagnostics,
+    )
+
+    assert len(summary) == 1
+    assert summary[0].reference_hidden_width == 8
+    assert summary[0].candidate_hidden_width == 16
+    assert summary[0].reference_parameter_count == 113
+    assert summary[0].candidate_parameter_count == 353
+    assert summary[0].reference_val_mse == pytest.approx(2.3189919622e-04)
+    assert summary[0].candidate_best_val_mse == pytest.approx(2.0e-4)
+    assert summary[0].candidate_eval_p_mae_mw == pytest.approx(0.1)
+    assert summary[0].improved_over_width8 is True
 
 
 def test_new_error_table_columns_exist(exp_module):
@@ -277,11 +455,18 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
     history_rows = [
         exp_module.TrainingHistoryRow(
             step=0,
+            global_step=0,
+            phase="base",
+            phase_step=0,
+            cycle_id=None,
             train_mse=1.0,
             val_mse=1.0,
             train_mae_mw=0.1,
             val_mae_mw=0.1,
             learning_rate=0.02,
+            is_best_checkpoint=True,
+            hidden_width=config.hidden_width,
+            parameter_count=exp_module.count_mlp_parameters(params),
         )
     ]
     error_rows = [
@@ -364,9 +549,14 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
             train_points=config.train_samples,
             val_points=config.val_samples,
             eval_points=config.eval_samples,
+            best_phase="base",
+            best_cycle_id=None,
+            best_global_step=1,
             best_step=1,
             best_val_mse=1.0,
             best_val_mae_mw=0.1,
+            final_phase="base",
+            final_global_step=1,
             final_step=1,
             final_val_mse=1.0,
             final_val_mae_mw=0.1,
@@ -437,14 +627,30 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
         )
     ]
     diagnostics = exp_module.TrainingDiagnostics(
+        best_phase="base",
+        best_cycle_id=None,
+        best_global_step=1,
         best_step=1,
         best_val_mse=1.0,
         best_val_mae_mw=0.1,
+        final_phase="base",
+        final_global_step=1,
         final_step=1,
         final_train_mse=1.0,
         final_val_mse=1.0,
         final_train_mae_mw=0.1,
         final_val_mae_mw=0.1,
+    )
+    training_improvement_rows = exp_module.build_training_improvement_summary(
+        error_rows,
+        config,
+        diagnostics,
+    )
+    architecture_comparison_rows = exp_module.build_architecture_comparison_summary(
+        error_rows,
+        config,
+        params,
+        diagnostics,
     )
 
     exp_module.export_all(
@@ -460,6 +666,8 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
         pf_error_summary_rows,
         sensitivity_error_rows,
         sensitivity_error_summary_rows,
+        training_improvement_rows,
+        architecture_comparison_rows,
         summary_rows,
         config,
         params,
@@ -468,3 +676,31 @@ def test_export_all_writes_mandatory_stub_artifacts(exp_module, tmp_path: Path):
 
     for name in exp_module.REQUIRED_ARTIFACTS:
         assert (tmp_path / name).exists(), f"Missing artifact: {name}"
+
+    with (tmp_path / "metadata.json").open(encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    assert metadata["learning_rate_schedule"]["initial_learning_rate_start"] == pytest.approx(
+        8e-2
+    )
+    assert metadata["learning_rate_schedule"]["initial_learning_rate_end"] == pytest.approx(
+        1e-4
+    )
+    assert metadata["learning_rate_schedule"]["base_train_steps"] == 8000
+    assert metadata["learning_rate_schedule"]["finetune_schedule"] == (
+        "cosine_warm_restarts_decay"
+    )
+    assert metadata["best_validation_checkpoint"]["best_phase"] == "base"
+    assert "training_improvement_summary" in metadata
+    assert metadata["model_architecture"]["hidden_width"] == 16
+    assert metadata["mlp_parameter_count"] == 353
+    assert metadata["architecture_capacity_run"]["candidate_hidden_width"] == 16
+    assert metadata["architecture_capacity_run"]["width8_checkpoint_reused"] is False
+    assert "architecture_comparison_summary" in metadata["architecture_capacity_run"]
+
+    readme_text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "8.0e-02" in readme_text
+    assert "1.0e-04" in readme_text
+    assert "Comparison to previous training run" in readme_text
+    assert "warm-restart finetune" in readme_text
+    assert "Capacity run" in readme_text
+    assert "hidden width" in readme_text

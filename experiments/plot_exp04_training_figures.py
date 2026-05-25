@@ -28,8 +28,9 @@ RESULTS_DIR = (
 )
 FIGURES_DIR = RESULTS_DIR / "figures"
 TRAINING_HISTORY_FILENAME = "training_history.csv"
+ARCHITECTURE_COMPARISON_FILENAME = "architecture_comparison_summary.csv"
 
-STEP_COLUMN_CANDIDATES = ("step", "iteration", "epoch")
+STEP_COLUMN_CANDIDATES = ("global_step", "step", "iteration", "epoch")
 LOSS_COLUMN_CANDIDATES = (
     ("train_mse", "val_mse"),
     ("train_loss", "val_loss"),
@@ -53,6 +54,36 @@ def load_training_history(results_dir: Path = RESULTS_DIR) -> pd.DataFrame:
     history = pd.read_csv(path)
     validate_training_history(history)
     return history
+
+
+def load_architecture_comparison(results_dir: Path = RESULTS_DIR) -> pd.DataFrame | None:
+    """Load the optional width-8-vs-width-16 architecture comparison."""
+
+    path = results_dir / ARCHITECTURE_COMPARISON_FILENAME
+    if not path.exists():
+        return None
+    comparison = pd.read_csv(path)
+    if comparison.empty:
+        return None
+    required = {
+        "reference_hidden_width",
+        "candidate_hidden_width",
+        "reference_val_mse",
+        "candidate_best_val_mse",
+        "reference_eval_p_mae_mw",
+        "candidate_eval_p_mae_mw",
+        "reference_eval_p_rmse_mw",
+        "candidate_eval_p_rmse_mw",
+        "reference_max_p_error_mw",
+        "candidate_max_p_error_mw",
+    }
+    missing = required.difference(comparison.columns)
+    if missing:
+        raise ValueError(
+            "Architecture-comparison summary is missing columns: "
+            f"{', '.join(sorted(missing))}."
+        )
+    return comparison
 
 
 def validate_training_history(history: pd.DataFrame) -> None:
@@ -128,13 +159,15 @@ def _prepared_metric_frame(
     val_column: str,
 ) -> pd.DataFrame:
     step_column = detect_step_column(history)
-    frame = pd.DataFrame(
-        {
-            "step": _numeric_series(history, step_column),
-            "train": _numeric_series(history, train_column),
-            "validation": _numeric_series(history, val_column),
-        }
-    ).dropna()
+    data = {
+        "step": _numeric_series(history, step_column),
+        "train": _numeric_series(history, train_column),
+        "validation": _numeric_series(history, val_column),
+    }
+    for optional in ("phase", "phase_step", "cycle_id"):
+        if optional in history.columns:
+            data[optional] = history[optional]
+    frame = pd.DataFrame(data).dropna(subset=["step", "train", "validation"])
     if frame.empty:
         raise ValueError(
             f"No numeric rows remain for {step_column}, {train_column}, {val_column}."
@@ -154,6 +187,34 @@ def _format_metric(value: float) -> str:
     return f"{value:.4g}"
 
 
+def _add_training_phase_markers(ax: plt.Axes, frame: pd.DataFrame) -> None:
+    if "phase" not in frame.columns:
+        return
+    phases = frame["phase"].astype(str).to_numpy()
+    steps = frame["step"].to_numpy(dtype=float)
+    for idx in range(1, len(frame)):
+        if phases[idx] != phases[idx - 1]:
+            ax.axvline(
+                steps[idx],
+                color="0.35",
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.75,
+                label="Phase boundary" if "Phase boundary" not in ax.get_legend_handles_labels()[1] else None,
+            )
+    if "cycle_id" in frame.columns:
+        cycles = pd.to_numeric(frame["cycle_id"], errors="coerce").to_numpy()
+        for idx in range(1, len(frame)):
+            if np.isfinite(cycles[idx]) and cycles[idx] != cycles[idx - 1]:
+                ax.axvline(
+                    steps[idx],
+                    color="0.55",
+                    linestyle=":",
+                    linewidth=0.9,
+                    alpha=0.65,
+                )
+
+
 def _plot_metric_curve(
     history: pd.DataFrame,
     train_column: str,
@@ -171,16 +232,12 @@ def _plot_metric_curve(
     ax.plot(
         frame["step"],
         frame["train"],
-        marker="o",
-        markersize=3.5,
         linewidth=1.8,
         label=f"Train (final={_format_metric(final_train)})",
     )
     ax.plot(
         frame["step"],
         frame["validation"],
-        marker="s",
-        markersize=3.5,
         linewidth=1.8,
         label=f"Validation (final={_format_metric(final_val)})",
     )
@@ -190,6 +247,7 @@ def _plot_metric_curve(
     ax.set_ylabel(y_label)
     if use_log_y:
         ax.set_yscale("log")
+    _add_training_phase_markers(ax, frame)
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(loc="best", frameon=True)
     fig.tight_layout()
@@ -251,7 +309,11 @@ def plot_learning_rate_schedule(
             "step": _numeric_series(history, step_column),
             "learning_rate": _numeric_series(history, lr_column),
         }
-    ).dropna()
+    )
+    for optional in ("phase", "phase_step", "cycle_id"):
+        if optional in history.columns:
+            frame[optional] = history[optional]
+    frame = frame.dropna(subset=["step", "learning_rate"])
     if frame.empty:
         raise ValueError(f"No numeric rows remain for {step_column} and {lr_column}.")
     frame = frame.sort_values("step")
@@ -261,8 +323,6 @@ def plot_learning_rate_schedule(
     ax.plot(
         frame["step"],
         frame["learning_rate"],
-        marker="o",
-        markersize=3.5,
         linewidth=1.8,
         label="Learning rate",
     )
@@ -271,6 +331,7 @@ def plot_learning_rate_schedule(
     ax.set_ylabel("Learning rate")
     if use_log_y:
         ax.set_yscale("log")
+    _add_training_phase_markers(ax, frame)
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(loc="best", frameon=True)
     fig.tight_layout()
@@ -282,6 +343,42 @@ def plot_learning_rate_schedule(
         float(frame["learning_rate"].iloc[0]),
         float(frame["learning_rate"].iloc[-1]),
     )
+
+
+def plot_architecture_comparison(
+    comparison: pd.DataFrame,
+    figures_dir: Path = FIGURES_DIR,
+) -> tuple[Path, Path]:
+    """Plot compact width-8 vs width-16 surrogate-quality metrics."""
+
+    row = comparison.iloc[0]
+    ref_width = int(row["reference_hidden_width"])
+    cand_width = int(row["candidate_hidden_width"])
+    metrics = [
+        ("Val MSE", "reference_val_mse", "candidate_best_val_mse"),
+        ("Eval P-MAE [MW]", "reference_eval_p_mae_mw", "candidate_eval_p_mae_mw"),
+        ("Eval P-RMSE [MW]", "reference_eval_p_rmse_mw", "candidate_eval_p_rmse_mw"),
+        ("Max P-error [MW]", "reference_max_p_error_mw", "candidate_max_p_error_mw"),
+    ]
+    labels = [item[0] for item in metrics]
+    ref_values = np.asarray([float(row[item[1]]) for item in metrics], dtype=float)
+    cand_values = np.asarray([float(row[item[2]]) for item in metrics], dtype=float)
+
+    x = np.arange(len(metrics))
+    width = 0.36
+    fig, ax = plt.subplots(figsize=(7.6, 4.6))
+    ax.bar(x - width / 2, ref_values, width, label=f"width {ref_width}")
+    ax.bar(x + width / 2, cand_values, width, label=f"width {cand_width}")
+    ax.set_title("Experiment 4: Architecture Comparison", pad=12)
+    ax.set_ylabel("Metric value")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=20, ha="right")
+    if should_use_log_y(pd.Series(ref_values), pd.Series(cand_values)):
+        ax.set_yscale("log")
+    ax.grid(True, axis="y", which="both", linestyle=":", linewidth=0.7, alpha=0.7)
+    ax.legend(loc="best", frameon=True)
+    fig.tight_layout()
+    return _save_figure(fig, "fig04_architecture_comparison", figures_dir)
 
 
 def _save_figure(fig: plt.Figure, stem: str, figures_dir: Path) -> tuple[Path, Path]:
@@ -303,6 +400,7 @@ def write_figures_readme(
     loss_summary: tuple[bool, float, float],
     mae_summary: tuple[bool, float, float] | None = None,
     lr_summary: tuple[bool, float, float] | None = None,
+    architecture_summary: tuple[int, int] | None = None,
 ) -> Path:
     """Write a compact README for the Experiment 4 training-history figures."""
 
@@ -314,6 +412,10 @@ def write_figures_readme(
         "",
         "This folder contains figures generated only from the existing "
         "`training_history.csv` artifact of Experiment 4.",
+        "",
+        "When `phase`, `global_step`, and `cycle_id` columns are present, the "
+        "figures use `global_step` on the x-axis and mark the Phase-A/Phase-B "
+        "boundary plus warm-restart cycle boundaries.",
         "",
         "## Fig. 1 - NN surrogate training loss",
         "",
@@ -364,6 +466,21 @@ def write_figures_readme(
             ]
         )
 
+    if architecture_summary is not None:
+        ref_width, cand_width = architecture_summary
+        lines.extend(
+            [
+                "",
+                "## Fig. 4 - Architecture comparison",
+                "",
+                "`fig04_architecture_comparison.png` and "
+                "`fig04_architecture_comparison.pdf` compare the width "
+                f"`{ref_width}` reference against the width `{cand_width}` "
+                "candidate using Val-MSE, Eval P-MAE, Eval P-RMSE, and max "
+                "P-error from `architecture_comparison_summary.csv`.",
+            ]
+        )
+
     lines.extend(
         [
             "",
@@ -392,6 +509,7 @@ def generate_figures(
         figures_dir = results_dir / "figures"
 
     history = load_training_history(results_dir)
+    architecture_comparison = load_architecture_comparison(results_dir)
     outputs: list[Path] = []
 
     loss_png, loss_pdf, loss_log_y, final_train_loss, final_val_loss = (
@@ -413,11 +531,24 @@ def generate_figures(
         outputs.extend([lr_png, lr_pdf])
         lr_summary = (lr_log_y, first_lr, final_lr)
 
+    architecture_summary = None
+    if architecture_comparison is not None:
+        arch_png, arch_pdf = plot_architecture_comparison(
+            architecture_comparison,
+            figures_dir,
+        )
+        outputs.extend([arch_png, arch_pdf])
+        architecture_summary = (
+            int(architecture_comparison.iloc[0]["reference_hidden_width"]),
+            int(architecture_comparison.iloc[0]["candidate_hidden_width"]),
+        )
+
     readme_path = write_figures_readme(
         figures_dir,
         loss_summary=(loss_log_y, final_train_loss, final_val_loss),
         mae_summary=mae_summary,
         lr_summary=lr_summary,
+        architecture_summary=architecture_summary,
     )
     outputs.append(readme_path)
     return outputs

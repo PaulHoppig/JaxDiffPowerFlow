@@ -10,12 +10,15 @@ import numpy as np
 
 from diffpf.models.pq_surrogate import (
     DEFAULT_EVAL_SAMPLES,
+    DEFAULT_HIDDEN_LAYERS,
+    DEFAULT_HIDDEN_WIDTH,
     DEFAULT_LEARNING_RATE_END,
     DEFAULT_LEARNING_RATE_START,
     DEFAULT_LR_SCHEDULE,
     DEFAULT_MAX_TRAIN_STEPS,
     DEFAULT_TRAIN_SAMPLES,
     DEFAULT_VAL_SAMPLES,
+    DEFAULT_WARM_RESTART_SCHEDULE,
     DEFAULT_WEATHER_NORMALIZATION,
     SurrogateTrainingConfig,
     count_mlp_parameters,
@@ -110,6 +113,7 @@ def test_gradients_with_respect_to_weather_are_finite():
 def test_parameter_count_stays_small():
     params = init_mlp_params(jax.random.PRNGKey(5))
 
+    assert count_mlp_parameters(params) == 353
     assert count_mlp_parameters(params) < 500
 
 
@@ -119,10 +123,20 @@ def test_default_training_config_documents_full_exp04_run():
     assert config.train_samples == DEFAULT_TRAIN_SAMPLES == 32768
     assert config.val_samples == DEFAULT_VAL_SAMPLES == 8192
     assert config.eval_samples == DEFAULT_EVAL_SAMPLES == 8192
-    assert config.learning_rate_start == DEFAULT_LEARNING_RATE_START == 5e-2
-    assert config.learning_rate_end == DEFAULT_LEARNING_RATE_END == 5e-4
-    assert config.lr_schedule == DEFAULT_LR_SCHEDULE == "cosine_decay"
-    assert config.max_train_steps == DEFAULT_MAX_TRAIN_STEPS == 4000
+    assert config.learning_rate_start == DEFAULT_LEARNING_RATE_START == 8e-2
+    assert config.learning_rate_end == DEFAULT_LEARNING_RATE_END == 1e-4
+    assert config.lr_schedule == DEFAULT_LR_SCHEDULE == DEFAULT_WARM_RESTART_SCHEDULE
+    assert config.lr_schedule == "cosine_warm_restarts_decay"
+    assert config.max_train_steps == DEFAULT_MAX_TRAIN_STEPS == 8000
+    assert config.hidden_width == DEFAULT_HIDDEN_WIDTH == 16
+    assert config.hidden_layers == DEFAULT_HIDDEN_LAYERS == 2
+    assert config.warm_restart_enabled is True
+    assert config.base_train_steps == 8000
+    assert config.finetune_steps == 8000
+    assert config.restart_cycle_steps == (2000, 2000, 2000, 2000)
+    assert config.restart_lr_max == (2e-2, 1e-2, 5e-3, 2e-3)
+    assert config.restart_lr_min == (5e-4, 2e-4, 1e-4, 5e-5)
+    assert config.initial_schedule == "cosine_decay"
 
 
 def test_surrogate_module_does_not_import_pandapower():

@@ -19,10 +19,19 @@ from diffpf.models.pv import PV_BASE_P_MW, PV_Q_OVER_P, PVInjection
 DEFAULT_TRAIN_SAMPLES = 32768
 DEFAULT_VAL_SAMPLES = 8192
 DEFAULT_EVAL_SAMPLES = 8192
-DEFAULT_LEARNING_RATE_START = 5e-2
-DEFAULT_LEARNING_RATE_END = 5e-4
-DEFAULT_LR_SCHEDULE = "cosine_decay"
-DEFAULT_MAX_TRAIN_STEPS = 4000
+DEFAULT_LEARNING_RATE_START = 8e-2
+DEFAULT_LEARNING_RATE_END = 1e-4
+DEFAULT_MAX_TRAIN_STEPS = 8000
+DEFAULT_WARM_RESTART_SCHEDULE = "cosine_warm_restarts_decay"
+DEFAULT_LR_SCHEDULE = DEFAULT_WARM_RESTART_SCHEDULE
+DEFAULT_WARM_RESTART_ENABLED = True
+DEFAULT_BASE_TRAIN_STEPS = 8000
+DEFAULT_FINETUNE_STEPS = 8000
+DEFAULT_RESTART_CYCLE_STEPS = (2000, 2000, 2000, 2000)
+DEFAULT_RESTART_LR_MAX = (2e-2, 1e-2, 5e-3, 2e-3)
+DEFAULT_RESTART_LR_MIN = (5e-4, 2e-4, 1e-4, 5e-5)
+DEFAULT_HIDDEN_WIDTH = 16
+DEFAULT_HIDDEN_LAYERS = 2
 
 
 class MLPParams(NamedTuple):
@@ -46,14 +55,23 @@ class SurrogateTrainingConfig(NamedTuple):
     train_samples: int = DEFAULT_TRAIN_SAMPLES
     val_samples: int = DEFAULT_VAL_SAMPLES
     eval_samples: int = DEFAULT_EVAL_SAMPLES
-    hidden_width: int = 8
-    hidden_layers: int = 2
+    hidden_width: int = DEFAULT_HIDDEN_WIDTH
+    hidden_layers: int = DEFAULT_HIDDEN_LAYERS
     learning_rate: float = DEFAULT_LEARNING_RATE_START
     learning_rate_start: float = DEFAULT_LEARNING_RATE_START
     learning_rate_end: float = DEFAULT_LEARNING_RATE_END
     lr_schedule: str = DEFAULT_LR_SCHEDULE
     max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS
     log_every: int = 50
+    warm_restart_enabled: bool = DEFAULT_WARM_RESTART_ENABLED
+    base_train_steps: int = DEFAULT_BASE_TRAIN_STEPS
+    finetune_steps: int = DEFAULT_FINETUNE_STEPS
+    restart_cycle_steps: tuple[int, ...] = DEFAULT_RESTART_CYCLE_STEPS
+    restart_lr_max: tuple[float, ...] = DEFAULT_RESTART_LR_MAX
+    restart_lr_min: tuple[float, ...] = DEFAULT_RESTART_LR_MIN
+    initial_schedule: str = "cosine_decay"
+    initial_learning_rate_start: float = DEFAULT_LEARNING_RATE_START
+    initial_learning_rate_end: float = DEFAULT_LEARNING_RATE_END
 
 
 DEFAULT_WEATHER_NORMALIZATION = WeatherInputNormalization()
@@ -63,8 +81,8 @@ DEFAULT_TRAINING_CONFIG = SurrogateTrainingConfig()
 def init_mlp_params(
     key: jax.Array,
     input_dim: int = 3,
-    hidden_width: int = 8,
-    hidden_layers: int = 2,
+    hidden_width: int = DEFAULT_HIDDEN_WIDTH,
+    hidden_layers: int = DEFAULT_HIDDEN_LAYERS,
     output_dim: int = 1,
 ) -> MLPParams:
     """Initialize a small tanh MLP with deterministic JAX PRNG keys."""

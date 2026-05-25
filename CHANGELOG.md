@@ -1,5 +1,358 @@
 # Changelog
 
+## 2026-05-22 - Experiment 4 Modellkapazitaetslauf mit hidden_width = 16
+
+### Kurzbeschreibung
+- Experiment 4 wurde als kontrollierter Modellkapazitaetslauf erneut
+  ausgefuehrt.
+- Die NN-Architektur aendert ausschliesslich `hidden_width=8` auf
+  `hidden_width=16`; `hidden_layers=2`, `tanh`, P-only und
+  `Q = -0.25 * P` bleiben unveraendert.
+- Datensatzgroessen bleiben `32768/8192/8192`; Wetterbereiche,
+  Input-Normalisierung, Trainingsziel `P_ref_mw / 2.0`, Loss-Funktion,
+  analytisches PV-Modell und Power-Flow-Kern bleiben unveraendert.
+- Die Trainingsstrategie bleibt zweiphasig: Phase A mit nicht-zyklischem
+  Cosine Decay `8e-2 -> 1e-4` ueber 8000 Schritte, Phase B mit 8000
+  Warm-Restart-Finetune-Schritten in vier Zyklen
+  (`2e-2 -> 5e-4`, `1e-2 -> 2e-4`, `5e-3 -> 1e-4`,
+  `2e-3 -> 5e-5`).
+- Der Width-16-Lauf wird neu initialisiert und vollstaendig trainiert; ein
+  Width-8-Checkpoint wird wegen inkompatibler Parameterformen nicht
+  wiederverwendet.
+- Die berechnete Parameterzahl steigt von `113` auf `353`.
+
+### Geaenderte Dateien
+- `src/diffpf/models/pq_surrogate.py` - Default-MLP-Breite auf 16 gesetzt und
+  Architekturkonstanten ergaenzt.
+- `src/diffpf/models/__init__.py` - Architekturkonstanten exportiert.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` -
+  Trainingshistorie um `hidden_width`/`parameter_count` erweitert,
+  Width-8-Referenzkonstanten und `architecture_comparison_summary` ergaenzt,
+  Metadata/README-Export auf den Width-16-Kapazitaetslauf aktualisiert.
+- `experiments/plot_exp04_training_figures.py` - optionale
+  Architekturvergleichsfigur `fig04_architecture_comparison` ergaenzt.
+- `tests/test_pq_surrogate_model.py` - Width-16-Default und Parameterzahl
+  abgesichert.
+- `tests/test_exp04_modular_surrogate_outputs.py` - Exp.-4-Schema,
+  Architekturvergleich und Metadata/README-Export fuer Width 16 abgesichert.
+- `tests/test_exp04_plot_outputs.py` - Plot-Pipeline fuer die neue
+  Architekturvergleichsfigur abgesichert.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - Width-16-Lauf,
+  Vergleich zu Width 8 und unveraenderte Modellgrenzen dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_improvement_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/architecture_comparison_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig03_learning_rate_schedule.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig04_architecture_comparison.png/pdf`
+
+### Ergebnisnotizen
+- Voller Exp.-4-Lauf erfolgreich mit Python 3.11:
+  `python experiments/exp04_modular_upstream_nn_surrogate.py`.
+- Plot-Pipeline erfolgreich aus vorhandenen Artefakten ausgefuehrt:
+  `python experiments/plot_exp04_training_figures.py`.
+- Der Width-16-Lauf war stabil; es trat kein NaN/Inf-Loss auf.
+- Best-Validation-Checkpoint: Phase `warm_restart_finetune`, Zyklus `4`,
+  global Step `16000`, Validation-MSE `1.0796882754565427e-04`,
+  Validation-MAE `0.01641394628038067 MW`.
+- Finale Fehler am letzten Schritt sind identisch mit dem Best-Checkpoint:
+  Train-MSE `1.0956320206449241e-04`, Val-MSE
+  `1.0796882754565427e-04`, Train-MAE `0.01646623242692842 MW`,
+  Val-MAE `0.01641394628038067 MW`.
+- Eval-Split: P-MAE `0.016544012227095853 MW`, P-RMSE
+  `0.021139486791535485 MW`, maximale P-Abweichung
+  `0.11933011475462596 MW`.
+- Gegenueber dem bisherigen Width-8-Warm-Restart-Lauf
+  (Val-MSE `2.3189919622e-04`, Val-MAE `0.023338907 MW`, Eval P-MAE
+  `0.023523218 MW`, Eval P-RMSE `0.031040266 MW`, Max P-Fehler
+  `0.177669209 MW`) ist Width 16 besser.
+- Relative Verbesserungen gegen Width 8: Val-MSE `0.5344148263315862`,
+  Val-MAE `0.29671315454572617`, Eval P-MAE `0.2966943456845125`,
+  Eval P-RMSE `0.31896566893030215`, Max P-Fehler
+  `0.3283579331147584`.
+- Alle drei Upstream-Modelle konvergierten in allen bestehenden kompakten
+  Power-Flow-Vergleichsfaellen: `18/18` je Modell. Es wurden keine neuen
+  massiven Power-Flow-Solves auf dem 8192er-Eval-Split eingefuehrt.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_pq_surrogate_model.py -q`
+  (`8 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (`17 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_plot_outputs.py -q`
+  (`17 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_pv_model.py -q`
+  (`16 passed`).
+- Optional ausgefuehrt:
+  `python -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (`27 passed`).
+
+### Bekannte Einschraenkungen
+- Das NN bleibt ein synthetisches Distillation-Surrogat und kein
+  Messdaten-Prognosemodell.
+- Das NN bleibt P-only; `Q = -0.25 * P` bleibt deterministisch gekoppelt.
+- Keine Aenderung an Datensatzgroessen, Wetterbereichen, Input-Normalisierung,
+  Loss-Funktion oder Anzahl versteckter Schichten.
+- Kein Gradient-Matching-Loss und keine physikalische Nebenbedingung.
+- Keine Aenderung am AC-Power-Flow-Kern, Residuum, Y-Bus, Solver,
+  impliziter Differentiation oder analytischen PV-Modell.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Sensitivitaetsfehler werden weiterhin auf den kompakten Exp.-4-Faellen
+  bewertet; kein 8192er-Power-Flow-Sweep wurde eingefuehrt.
+
+## 2026-05-22 - Experiment 4 Warm-Restart-Finetune mit abnehmender zyklischer Lernrate
+
+### Kurzbeschreibung
+- Experiment 4 wurde als kontrollierter zweiphasiger Tuninglauf erneut
+  ausgefuehrt.
+- Da kein persistierter Parametercheckpoint des vorherigen 8000-Step-Laufs
+  existierte, wurde kein echtes Laden von Platte umgesetzt. Stattdessen fuehrt
+  das Experiment Phase A erneut aus und startet Phase B im selben Prozess aus
+  dem besten Phase-A-Validation-Checkpoint.
+- Datensatzgroessen bleiben `32768/8192/8192`; Architektur bleibt
+  `hidden_width=8`, `hidden_layers=2`, `tanh`, P-only und
+  `Q = -0.25 * P`.
+- Phase A: nicht-zyklischer Cosine Decay `8e-2 -> 1e-4` ueber 8000 Schritte.
+- Phase B: `cosine_warm_restarts_decay` mit 4 Zyklen ueber weitere 8000
+  Schritte: `2e-2 -> 5e-4`, `1e-2 -> 2e-4`, `5e-3 -> 1e-4`,
+  `2e-3 -> 5e-5`, jeweils ueber 2000 Schritte.
+- Globales Best-Validation-Checkpointing laeuft ueber beide Phasen; alle
+  nachgelagerten Surrogat-, Power-Flow- und Sensitivitaetsartefakte verwenden
+  den besten globalen Validation-Checkpoint.
+
+### Geaenderte Dateien
+- `src/diffpf/models/pq_surrogate.py` - Warm-Restart-Konfigurationsfelder und
+  Default-Tuningmodus fuer Experiment 4 ergaenzt.
+- `src/diffpf/models/__init__.py` - Warm-Restart-Schedule-Konstante exportiert.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` -
+  `cosine_warm_restarts_decay`, zweiphasiges Training, erweiterte
+  Trainingshistorie, globale Checkpoint-Diagnostik und aktualisierte
+  Improvement-Summary.
+- `experiments/plot_exp04_training_figures.py` - Plot-Pipeline nutzt
+  `global_step`, markiert Phase-A/Phase-B-Grenze und Warm-Restart-Zyklen.
+- `tests/test_pq_surrogate_model.py` - Default-Konfiguration und
+  Warm-Restart-Felder abgesichert.
+- `tests/test_exp04_modular_surrogate_outputs.py` - Schedule-Grenzen,
+  zweiphasige History-Spalten, Metadata/README und Improvement-Summary
+  abgesichert.
+- `tests/test_exp04_plot_outputs.py` - Plot-Tests fuer `global_step`, Phasen
+  und Warm-Restart-History aktualisiert.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - Warm-Restart-Finetune,
+  Referenzvergleich und unveraenderte Modellgrenzen dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_improvement_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig03_learning_rate_schedule.png/pdf`
+
+### Ergebnisnotizen
+- Voller Exp.-4-Lauf erfolgreich mit Python 3.11:
+  `python experiments/exp04_modular_upstream_nn_surrogate.py`.
+- Plot-Pipeline erfolgreich aus vorhandener `training_history.csv` ausgefuehrt:
+  `python experiments/plot_exp04_training_figures.py`.
+- Warm-Restart-Finetune war stabil; es trat kein NaN/Inf-Loss auf.
+- Best-Validation-Checkpoint: Phase `warm_restart_finetune`, Zyklus `4`,
+  global Step `16000`, Validation-MSE `2.318991962219021e-04`,
+  Validation-MAE `0.02333890667386509 MW`.
+- Finale Fehler am letzten Schritt sind identisch mit dem Best-Checkpoint:
+  Train-MSE `2.3887884675560686e-04`, Val-MSE
+  `2.318991962219021e-04`, Train-MAE `0.02359521216551384 MW`,
+  Val-MAE `0.02333890667386509 MW`.
+- Eval-Split: P-MAE `0.023523218447294967 MW`, P-RMSE
+  `0.03104026574651338 MW`, maximale P-Abweichung
+  `0.1776692089622296 MW`.
+- Gegenueber dem 8000-Step-Referenzlauf
+  (Val-MSE `2.565834826e-04`, Val-MAE `0.024622580 MW`, Eval P-MAE
+  `0.024815085 MW`, Eval P-RMSE `0.032617826 MW`, Max P-Fehler
+  `0.185804774 MW`) ist der Warm-Restart-Finetune besser.
+- Relative Verbesserungen: Val-MSE `0.09620372335728015`, Val-MAE
+  `0.05213398945743757`, Eval P-MAE `0.05205972708556242`, Eval P-RMSE
+  `0.04836497237696414`, Max P-Fehler `0.04378555438930976`.
+- Alle drei Upstream-Modelle konvergierten in allen bestehenden kompakten
+  Power-Flow-Vergleichsfaellen: `18/18` je Modell. Es wurden keine neuen
+  massiven Power-Flow-Solves auf dem 8192er-Eval-Split eingefuehrt.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_pq_surrogate_model.py -q`
+  (`8 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (`16 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_plot_outputs.py -q`
+  (`15 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_pv_model.py -q`
+  (`16 passed`).
+- Optional ausgefuehrt:
+  `python -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (`27 passed`).
+
+### Bekannte Einschraenkungen
+- Das NN bleibt ein synthetisches Distillation-Surrogat und kein
+  Messdaten-Prognosemodell.
+- Das NN bleibt P-only; `Q = -0.25 * P` bleibt deterministisch gekoppelt.
+- Keine Aenderung an Datensatzgroessen, Wetterbereichen, Input-Normalisierung,
+  NN-Architektur oder Loss-Funktion.
+- Kein Gradient-Matching-Loss und keine physikalische Nebenbedingung.
+- Keine Aenderung am AC-Power-Flow-Kern, Residuum, Y-Bus, Solver,
+  impliziter Differentiation oder analytischen PV-Modell.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Sensitivitaetsfehler werden weiterhin auf den kompakten Exp.-4-Faellen
+  ausgewertet; der 8192er-Eval-Split wird nicht fuer massive PF-Solves genutzt.
+
+## 2026-05-22 - Experiment 4 erneutes NN-Surrogat-Training mit staerkerem LR-Decay
+
+### Kurzbeschreibung
+- Experiment 4 wurde erneut mit unveraenderten Datensatzgroessen
+  `32768/8192/8192` ausgefuehrt.
+- Das JAX-only P-only-MLP nutzt weiterhin dieselbe Architektur, dieselbe
+  Wetterverteilung, dieselbe Input-Normalisierung und dasselbe Trainingsziel
+  `P_ref_mw / 2.0`.
+- Das Optimierungsregime des Full-/Default-Hauptlaufs wurde auf
+  nicht-zyklischen Cosine Decay von `8e-2` auf `1e-4` ueber `8000`
+  Trainingsschritte geaendert. Best-Validation-Checkpointing bleibt aktiv.
+- Es wurden keine Aenderungen am analytischen PV-Modell, am P/Q-Adapter, an
+  `example_simple()`, am AC-Power-Flow-Kern, an Residuen, Y-Bus, Solver,
+  impliziter Differentiation oder Observables vorgenommen.
+
+### Geaenderte Dateien
+- `src/diffpf/models/pq_surrogate.py` - Default-Lernraten und
+  Default-Trainingsschritte fuer den Exp.-4-Hauptlauf auf `8e-2 -> 1e-4`
+  ueber `8000` Schritte gesetzt.
+- `experiments/exp04_modular_upstream_nn_surrogate.py` -
+  Vorreferenzmetriken, nicht-stille Non-Finite-Trainingserkennung,
+  `training_improvement_summary.csv/json`, Metadata- und README-Erweiterung.
+- `tests/test_pq_surrogate_model.py` - Tests fuer die neue Full-Default-
+  Konfiguration.
+- `tests/test_exp04_modular_surrogate_outputs.py` - Tests fuer neue
+  LR-Defaults, Learning-Rate-Export, Improvement-Summary und README/Metadata.
+- `tests/test_exp04_plot_outputs.py` - Testdaten fuer die neue LR-Schedule
+  aktualisiert.
+- `docs/context/experiment_04_nn_surrogate_plan.md` - neue LR-Konfiguration,
+  unveraenderte Modellgrenzen und Ergebnisvergleich dokumentiert.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Aktualisierte Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/metadata.json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_dataset_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_history.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/surrogate_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/model_comparison.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/coupling_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/gradient_success_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_pattern_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/pf_observable_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_table.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/sensitivity_error_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/run_summary.csv/json`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/README.md`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig01_training_loss_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig02_training_mae_curve.png/pdf`
+- `experiments/results/exp04_modular_upstream_nn_surrogate/figures/fig03_learning_rate_schedule.png/pdf`
+
+### Neue Artefakte
+- `experiments/results/exp04_modular_upstream_nn_surrogate/training_improvement_summary.csv/json`
+
+### Ergebnisnotizen
+- Voller Exp.-4-Lauf erfolgreich mit Python 3.11:
+  `python experiments/exp04_modular_upstream_nn_surrogate.py`.
+- Plot-Pipeline erfolgreich aus vorhandener `training_history.csv` ausgefuehrt:
+  `python experiments/plot_exp04_training_figures.py`.
+- Das Training mit Start-LR `8e-2` war stabil; es trat kein NaN/Inf-Loss auf.
+- Best-Validation-Checkpoint: Schritt `8000`, Validation-MSE
+  `2.5658348260553096e-04`, Validation-MAE
+  `0.024622580033535818 MW`.
+- Finale Fehler am letzten Schritt sind identisch mit dem Best-Checkpoint:
+  Train-MSE `2.6436741913525146e-04`, Val-MSE
+  `2.5658348260553096e-04`, Train-MAE `0.024900537295140097 MW`,
+  Val-MAE `0.024622580033535818 MW`.
+- Eval-Split: P-MAE `0.02481508538556336 MW`, P-RMSE
+  `0.032617825812151176 MW`, maximale P-Abweichung
+  `0.18580477434619525 MW`.
+- Gegenueber dem vorherigen Lauf
+  (Val-MSE `8.4781e-04`, Val-MAE `0.046857 MW`, Eval P-MAE
+  `0.046775 MW`, Eval P-RMSE `0.058539 MW`, Max P-Fehler
+  `0.268626 MW`) ist der neue Lauf in allen genannten Surrogatmetriken besser.
+- Relative Verbesserungen: Val-MSE `0.6973573293479306`, Val-MAE
+  `0.4745165069565739`, Eval P-MAE `0.46947973520976244`, Eval P-RMSE
+  `0.44280179346843684`, Max P-Fehler `0.3083142571970127`.
+- Alle drei Upstream-Modelle konvergierten in allen bestehenden kompakten
+  Power-Flow-Vergleichsfaellen: `18/18` je Modell. Es wurden keine neuen
+  massiven Power-Flow-Solves auf dem 8192er-Eval-Split eingefuehrt.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_pq_surrogate_model.py -q`
+  (`8 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (`14 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_plot_outputs.py -q`
+  (`15 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_pv_model.py -q`
+  (`16 passed`).
+- Optional ausgefuehrt:
+  `python -m pytest tests/test_exp03_cross_domain_outputs.py -q`
+  (`27 passed`).
+
+### Bekannte Einschraenkungen
+- Das NN bleibt ein synthetisches Distillation-Surrogat und kein
+  Messdaten-Prognosemodell.
+- Das NN bleibt P-only; `Q = -0.25 * P` bleibt deterministisch gekoppelt.
+- Keine Aenderung am AC-Power-Flow-Kern, Residuum, Y-Bus, Solver,
+  impliziter Differentiation oder analytischen PV-Modell.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Sensitivitaetsfehler werden weiterhin auf den kompakten Exp.-4-Faellen
+  ausgewertet; der 8192er-Eval-Split wird nicht fuer massive PF-Solves genutzt.
+
 ## 2026-05-20 - Experiment 4 groesseres NN-Surrogat mit LR-Decay und Fehlerhauptmetriken
 
 ### Kurzbeschreibung

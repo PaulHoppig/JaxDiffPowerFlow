@@ -42,12 +42,14 @@ from diffpf.core.types import NetworkParams, PFState
 from diffpf.core.ybus import build_ybus
 from diffpf.models.pq_surrogate import (
     DEFAULT_EVAL_SAMPLES,
+    DEFAULT_HIDDEN_WIDTH,
     DEFAULT_LEARNING_RATE_END,
     DEFAULT_LEARNING_RATE_START,
     DEFAULT_LR_SCHEDULE,
     DEFAULT_MAX_TRAIN_STEPS,
     DEFAULT_TRAIN_SAMPLES,
     DEFAULT_VAL_SAMPLES,
+    DEFAULT_WARM_RESTART_SCHEDULE,
     DEFAULT_WEATHER_NORMALIZATION,
     MLPParams,
     SurrogateTrainingConfig,
@@ -122,6 +124,18 @@ WEATHER_CASES: tuple[dict, ...] = (
 )
 FD_STEPS = {"g_poa_wm2": 1.0, "t_amb_c": 0.05, "wind_ms": 0.01}
 REL_ERROR_FLOOR = 1e-12
+REFERENCE_VAL_MSE = 2.565834826e-04
+REFERENCE_VAL_MAE_MW = 0.024622580
+REFERENCE_EVAL_P_MAE_MW = 0.024815085
+REFERENCE_EVAL_P_RMSE_MW = 0.032617826
+REFERENCE_MAX_P_ERROR_MW = 0.185804774
+WIDTH8_REFERENCE_HIDDEN_WIDTH = 8
+WIDTH8_REFERENCE_PARAMETER_COUNT = 113
+WIDTH8_REFERENCE_VAL_MSE = 2.3189919622e-04
+WIDTH8_REFERENCE_VAL_MAE_MW = 0.023338907
+WIDTH8_REFERENCE_EVAL_P_MAE_MW = 0.023523218
+WIDTH8_REFERENCE_EVAL_P_RMSE_MW = 0.031040266
+WIDTH8_REFERENCE_MAX_P_ERROR_MW = 0.177669209
 
 TRAINING_DATASET_SUMMARY_COLUMNS: tuple[str, ...]
 TRAINING_HISTORY_COLUMNS: tuple[str, ...]
@@ -150,11 +164,18 @@ class TrainingDatasetSummaryRow:
 @dataclass(frozen=True)
 class TrainingHistoryRow:
     step: int
+    global_step: int
+    phase: str
+    phase_step: int
+    cycle_id: int | None
+    hidden_width: int
+    parameter_count: int
     train_mse: float
     val_mse: float
     train_mae_mw: float
     val_mae_mw: float
     learning_rate: float
+    is_best_checkpoint: bool
 
 
 @dataclass(frozen=True)
@@ -318,9 +339,14 @@ class SensitivityErrorSummaryRow:
 
 @dataclass(frozen=True)
 class TrainingDiagnostics:
+    best_phase: str
+    best_cycle_id: int | None
+    best_global_step: int
     best_step: int
     best_val_mse: float
     best_val_mae_mw: float
+    final_phase: str
+    final_global_step: int
     final_step: int
     final_train_mse: float
     final_val_mse: float
@@ -329,14 +355,79 @@ class TrainingDiagnostics:
 
 
 @dataclass(frozen=True)
+class TrainingImprovementSummaryRow:
+    reference_val_mse: float
+    reference_val_mae_mw: float
+    reference_eval_p_mae_mw: float
+    reference_eval_p_rmse_mw: float
+    reference_max_p_error_mw: float
+    new_best_val_mse: float
+    new_best_val_mae_mw: float
+    new_eval_p_mae_mw: float
+    new_eval_p_rmse_mw: float
+    new_max_p_error_mw: float
+    relative_improvement_val_mse: float
+    relative_improvement_val_mae: float
+    relative_improvement_eval_p_mae: float
+    relative_improvement_eval_p_rmse: float
+    relative_improvement_max_p_error: float
+    improved_over_reference: bool
+    best_phase: str
+    best_cycle_id: int | None
+    best_global_step: int
+    best_step: int
+    final_phase: str
+    final_global_step: int
+    final_step: int
+    train_points: int
+    val_points: int
+    eval_points: int
+
+
+@dataclass(frozen=True)
+class ArchitectureComparisonSummaryRow:
+    reference_hidden_width: int
+    candidate_hidden_width: int
+    reference_parameter_count: int
+    candidate_parameter_count: int
+    reference_val_mse: float
+    reference_val_mae_mw: float
+    reference_eval_p_mae_mw: float
+    reference_eval_p_rmse_mw: float
+    reference_max_p_error_mw: float
+    candidate_best_val_mse: float
+    candidate_best_val_mae_mw: float
+    candidate_eval_p_mae_mw: float
+    candidate_eval_p_rmse_mw: float
+    candidate_max_p_error_mw: float
+    relative_improvement_val_mse: float
+    relative_improvement_val_mae: float
+    relative_improvement_eval_p_mae: float
+    relative_improvement_eval_p_rmse: float
+    relative_improvement_max_p_error: float
+    improved_over_width8: bool
+    best_phase: str
+    best_cycle_id: int | None
+    best_global_step: int
+    train_points: int
+    val_points: int
+    eval_points: int
+
+
+@dataclass(frozen=True)
 class RunSummaryRow:
     model_name: str
     train_points: int
     val_points: int
     eval_points: int
+    best_phase: str
+    best_cycle_id: int | None
+    best_global_step: int
     best_step: int
     best_val_mse: float
     best_val_mae_mw: float
+    final_phase: str
+    final_global_step: int
     final_step: int
     final_val_mse: float
     final_val_mae_mw: float
@@ -358,6 +449,12 @@ PF_OBSERVABLE_ERROR_COLUMNS = tuple(f.name for f in fields(PFObservableErrorRow)
 PF_OBSERVABLE_ERROR_SUMMARY_COLUMNS = tuple(f.name for f in fields(PFObservableErrorSummaryRow))
 SENSITIVITY_ERROR_COLUMNS = tuple(f.name for f in fields(SensitivityErrorRow))
 SENSITIVITY_ERROR_SUMMARY_COLUMNS = tuple(f.name for f in fields(SensitivityErrorSummaryRow))
+TRAINING_IMPROVEMENT_SUMMARY_COLUMNS = tuple(
+    f.name for f in fields(TrainingImprovementSummaryRow)
+)
+ARCHITECTURE_COMPARISON_SUMMARY_COLUMNS = tuple(
+    f.name for f in fields(ArchitectureComparisonSummaryRow)
+)
 RUN_SUMMARY_COLUMNS = tuple(f.name for f in fields(RunSummaryRow))
 
 REQUIRED_ARTIFACTS = (
@@ -385,6 +482,10 @@ REQUIRED_ARTIFACTS = (
     "sensitivity_error_table.json",
     "sensitivity_error_summary.csv",
     "sensitivity_error_summary.json",
+    "training_improvement_summary.csv",
+    "training_improvement_summary.json",
+    "architecture_comparison_summary.csv",
+    "architecture_comparison_summary.json",
     "run_summary.csv",
     "run_summary.json",
 )
@@ -447,29 +548,115 @@ def _loss(params: MLPParams, norm: WeatherInputNormalization, x, y_norm) -> jnp.
     return jnp.mean((pred_norm - y_norm) ** 2)
 
 
-def learning_rate_at_step(step: int, config: SurrogateTrainingConfig) -> float:
-    """Return the full-batch GD learning rate for one training step."""
-
-    if config.max_train_steps <= 0:
+def _cosine_decay_lr(step: int, total_steps: int, start_lr: float, end_lr: float) -> float:
+    if total_steps <= 0:
         progress = 1.0
     else:
-        progress = min(max(float(step) / float(config.max_train_steps), 0.0), 1.0)
+        progress = min(max(float(step) / float(total_steps), 0.0), 1.0)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return float(end_lr) + (float(start_lr) - float(end_lr)) * cosine
 
-    start_lr = float(config.learning_rate_start)
+
+def _base_start_lr(config: SurrogateTrainingConfig) -> float:
+    start_lr = float(config.initial_learning_rate_start)
     if (
         float(config.learning_rate) != DEFAULT_LEARNING_RATE_START
-        and float(config.learning_rate_start) == DEFAULT_LEARNING_RATE_START
+        and float(config.initial_learning_rate_start) == DEFAULT_LEARNING_RATE_START
     ):
         start_lr = float(config.learning_rate)
-    end_lr = float(config.learning_rate_end)
+    return start_lr
+
+
+def base_learning_rate_at_step(step: int, config: SurrogateTrainingConfig) -> float:
+    """Return the Phase-A learning rate."""
+
+    start_lr = _base_start_lr(config)
+    end_lr = float(config.initial_learning_rate_end)
+    if config.initial_schedule == "constant":
+        return start_lr
+    if config.initial_schedule != "cosine_decay":
+        raise ValueError(
+            f"Unsupported initial learning-rate schedule: {config.initial_schedule!r}"
+        )
+    return _cosine_decay_lr(step, config.base_train_steps, start_lr, end_lr)
+
+
+def warm_restart_cycle_for_step(
+    phase_step: int,
+    config: SurrogateTrainingConfig,
+) -> tuple[int, int, int]:
+    """Return ``(cycle_id, local_step, cycle_steps)`` for a finetune step."""
+
+    cycle_steps = tuple(int(item) for item in config.restart_cycle_steps)
+    if not cycle_steps:
+        raise ValueError("restart_cycle_steps must contain at least one cycle.")
+    if len(cycle_steps) != len(config.restart_lr_max) or len(cycle_steps) != len(
+        config.restart_lr_min
+    ):
+        raise ValueError(
+            "restart_cycle_steps, restart_lr_max, and restart_lr_min must have "
+            "the same length."
+        )
+    if any(item <= 0 for item in cycle_steps):
+        raise ValueError("All restart cycle lengths must be positive.")
+
+    clamped_step = min(max(int(phase_step), 0), sum(cycle_steps))
+    start = 0
+    for idx, steps in enumerate(cycle_steps):
+        end = start + steps
+        is_last = idx == len(cycle_steps) - 1
+        if clamped_step < end or is_last:
+            return idx + 1, clamped_step - start, steps
+        start = end
+    raise AssertionError("unreachable restart-cycle lookup state")
+
+
+def warm_restart_learning_rate_at_step(
+    phase_step: int,
+    config: SurrogateTrainingConfig,
+) -> float:
+    """Return the Phase-B cosine-warm-restart learning rate."""
+
+    cycle_id, local_step, cycle_steps = warm_restart_cycle_for_step(phase_step, config)
+    lr_max = float(config.restart_lr_max[cycle_id - 1])
+    lr_min = float(config.restart_lr_min[cycle_id - 1])
+    return _cosine_decay_lr(local_step, cycle_steps, lr_max, lr_min)
+
+
+def learning_rate_for_phase_step(
+    phase: str,
+    phase_step: int,
+    config: SurrogateTrainingConfig,
+) -> float:
+    """Return the configured learning rate for a phase-local step."""
+
+    if phase == "base":
+        return base_learning_rate_at_step(phase_step, config)
+    if phase == "warm_restart_finetune":
+        if config.lr_schedule != DEFAULT_WARM_RESTART_SCHEDULE:
+            raise ValueError(
+                "Warm-restart finetune requires lr_schedule="
+                f"{DEFAULT_WARM_RESTART_SCHEDULE!r}."
+            )
+        return warm_restart_learning_rate_at_step(phase_step, config)
+    raise ValueError(f"Unsupported training phase: {phase!r}")
+
+
+def learning_rate_at_step(step: int, config: SurrogateTrainingConfig) -> float:
+    """Return the learning rate for legacy callers and schedule unit tests."""
 
     if config.lr_schedule == "constant":
-        return start_lr
-    if config.lr_schedule != "cosine_decay":
-        raise ValueError(f"Unsupported learning-rate schedule: {config.lr_schedule!r}")
-
-    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-    return end_lr + (start_lr - end_lr) * cosine
+        return _base_start_lr(config)
+    if config.lr_schedule == "cosine_decay":
+        return _cosine_decay_lr(
+            step,
+            config.max_train_steps,
+            float(config.learning_rate_start),
+            float(config.learning_rate_end),
+        )
+    if config.lr_schedule == DEFAULT_WARM_RESTART_SCHEDULE:
+        return warm_restart_learning_rate_at_step(step, config)
+    raise ValueError(f"Unsupported learning-rate schedule: {config.lr_schedule!r}")
 
 
 def _mae_mw(
@@ -487,7 +674,13 @@ def train_surrogate(
     *,
     return_diagnostics: bool = False,
 ):
-    """Distill the analytical PV weather model into the small MLP."""
+    """Distill the analytical PV weather model into the small MLP.
+
+    The current full Experiment 4 run is two-phase: Phase A reproduces the
+    non-cyclic cosine-decay baseline, and Phase B warm-restart-finetunes from
+    the best Phase-A checkpoint. The returned parameters are the best global
+    validation checkpoint across both phases.
+    """
 
     key = jax.random.PRNGKey(config.seed)
     key_params, key_train, key_val, key_eval = jax.random.split(key, 4)
@@ -502,47 +695,120 @@ def train_surrogate(
         hidden_layers=config.hidden_layers,
     )
     value_and_grad = jax.jit(jax.value_and_grad(_loss))
+    parameter_count = count_mlp_parameters(params)
 
     history: list[TrainingHistoryRow] = []
     best_params = params
+    best_phase = "base"
+    best_cycle_id: int | None = None
+    best_global_step = 0
     best_step = 0
     best_val_mse = float("inf")
     best_val_mae = float("inf")
-    for step in range(config.max_train_steps + 1):
-        train_mse, grads = value_and_grad(params, norm, train_x, train_y)
-        val_mse = _loss(params, norm, val_x, val_y)
-        val_mse_float = float(val_mse)
-        if val_mse_float < best_val_mse:
-            best_params = params
-            best_step = step
-            best_val_mse = val_mse_float
-            best_val_mae = float(_mae_mw(params, norm, val_x, val_y))
-        learning_rate = learning_rate_at_step(step, config)
-        if step % config.log_every == 0 or step == config.max_train_steps:
-            train_mae = _mae_mw(params, norm, train_x, train_y)
-            val_mae = _mae_mw(params, norm, val_x, val_y)
-            history.append(
-                TrainingHistoryRow(
-                    step=step,
-                    train_mse=float(train_mse),
-                    val_mse=val_mse_float,
-                    train_mae_mw=float(train_mae),
-                    val_mae_mw=float(val_mae),
-                    learning_rate=learning_rate,
-                )
+
+    def run_phase(
+        start_params: MLPParams,
+        *,
+        phase: str,
+        n_steps: int,
+        global_offset: int,
+    ) -> MLPParams:
+        nonlocal best_params
+        nonlocal best_phase
+        nonlocal best_cycle_id
+        nonlocal best_global_step
+        nonlocal best_step
+        nonlocal best_val_mse
+        nonlocal best_val_mae
+
+        params_phase = start_params
+        for phase_step in range(n_steps + 1):
+            global_step = global_offset + phase_step
+            cycle_id = (
+                warm_restart_cycle_for_step(phase_step, config)[0]
+                if phase == "warm_restart_finetune"
+                else None
             )
-        if step == config.max_train_steps:
-            break
-        params = jax.tree_util.tree_map(
-            lambda p, g: p - learning_rate * g,
-            params,
-            grads,
+            train_mse, grads = value_and_grad(params_phase, norm, train_x, train_y)
+            val_mse = _loss(params_phase, norm, val_x, val_y)
+            val_mse_float = float(val_mse)
+            if not math.isfinite(float(train_mse)) or not math.isfinite(val_mse_float):
+                raise RuntimeError(
+                    "Non-finite surrogate training loss encountered in "
+                    f"{phase} at phase_step={phase_step}, "
+                    f"global_step={global_step}: train_mse={float(train_mse)!r}, "
+                    f"val_mse={val_mse_float!r}."
+                )
+
+            is_best = val_mse_float < best_val_mse
+            if is_best:
+                best_params = params_phase
+                best_phase = phase
+                best_cycle_id = cycle_id
+                best_global_step = global_step
+                best_step = global_step
+                best_val_mse = val_mse_float
+                best_val_mae = float(_mae_mw(params_phase, norm, val_x, val_y))
+
+            learning_rate = learning_rate_for_phase_step(phase, phase_step, config)
+            if phase_step % config.log_every == 0 or phase_step == n_steps:
+                train_mae = _mae_mw(params_phase, norm, train_x, train_y)
+                val_mae = _mae_mw(params_phase, norm, val_x, val_y)
+                history.append(
+                    TrainingHistoryRow(
+                        step=global_step,
+                        global_step=global_step,
+                        phase=phase,
+                        phase_step=phase_step,
+                        cycle_id=cycle_id,
+                        hidden_width=config.hidden_width,
+                        parameter_count=parameter_count,
+                        train_mse=float(train_mse),
+                        val_mse=val_mse_float,
+                        train_mae_mw=float(train_mae),
+                        val_mae_mw=float(val_mae),
+                        learning_rate=learning_rate,
+                        is_best_checkpoint=is_best,
+                    )
+                )
+            if phase_step == n_steps:
+                break
+            params_phase = jax.tree_util.tree_map(
+                lambda p, g: p - learning_rate * g,
+                params_phase,
+                grads,
+            )
+        return params_phase
+
+    base_steps = config.base_train_steps if config.warm_restart_enabled else config.max_train_steps
+    phase_a_final_params = run_phase(
+        params,
+        phase="base",
+        n_steps=base_steps,
+        global_offset=0,
+    )
+    final_phase = "base"
+    if config.warm_restart_enabled:
+        _ = phase_a_final_params
+        phase_b_final_params = run_phase(
+            best_params,
+            phase="warm_restart_finetune",
+            n_steps=config.finetune_steps,
+            global_offset=base_steps,
         )
+        _ = phase_b_final_params
+        final_phase = "warm_restart_finetune"
+
     final = history[-1]
     diagnostics = TrainingDiagnostics(
+        best_phase=best_phase,
+        best_cycle_id=best_cycle_id,
+        best_global_step=best_global_step,
         best_step=best_step,
         best_val_mse=best_val_mse,
         best_val_mae_mw=best_val_mae,
+        final_phase=final_phase,
+        final_global_step=final.global_step,
         final_step=final.step,
         final_train_mse=final.train_mse,
         final_val_mse=final.val_mse,
@@ -741,6 +1007,146 @@ def build_surrogate_error_rows(
     return rows
 
 
+def _relative_improvement(previous: float, new: float) -> float:
+    return (previous - new) / previous if previous != 0.0 else float("nan")
+
+
+def build_training_improvement_summary(
+    error_rows: list[SurrogateErrorRow],
+    config: SurrogateTrainingConfig,
+    training_diagnostics: TrainingDiagnostics,
+) -> list[TrainingImprovementSummaryRow]:
+    """Compare the new main run against the documented previous Exp. 4 run."""
+
+    eval_abs_errors = np.asarray(
+        [row.p_abs_error_mw for row in error_rows if row.split == "eval"],
+        dtype=float,
+    )
+    if eval_abs_errors.size == 0:
+        eval_mae = float("nan")
+        eval_rmse = float("nan")
+        max_error = float("nan")
+    else:
+        eval_mae = float(np.mean(eval_abs_errors))
+        eval_rmse = float(np.sqrt(np.mean(eval_abs_errors**2)))
+        max_error = float(np.max(eval_abs_errors))
+
+    return [
+        TrainingImprovementSummaryRow(
+            reference_val_mse=REFERENCE_VAL_MSE,
+            reference_val_mae_mw=REFERENCE_VAL_MAE_MW,
+            reference_eval_p_mae_mw=REFERENCE_EVAL_P_MAE_MW,
+            reference_eval_p_rmse_mw=REFERENCE_EVAL_P_RMSE_MW,
+            reference_max_p_error_mw=REFERENCE_MAX_P_ERROR_MW,
+            new_best_val_mse=training_diagnostics.best_val_mse,
+            new_best_val_mae_mw=training_diagnostics.best_val_mae_mw,
+            new_eval_p_mae_mw=eval_mae,
+            new_eval_p_rmse_mw=eval_rmse,
+            new_max_p_error_mw=max_error,
+            relative_improvement_val_mse=_relative_improvement(
+                REFERENCE_VAL_MSE,
+                training_diagnostics.best_val_mse,
+            ),
+            relative_improvement_val_mae=_relative_improvement(
+                REFERENCE_VAL_MAE_MW,
+                training_diagnostics.best_val_mae_mw,
+            ),
+            relative_improvement_eval_p_mae=_relative_improvement(
+                REFERENCE_EVAL_P_MAE_MW,
+                eval_mae,
+            ),
+            relative_improvement_eval_p_rmse=_relative_improvement(
+                REFERENCE_EVAL_P_RMSE_MW,
+                eval_rmse,
+            ),
+            relative_improvement_max_p_error=_relative_improvement(
+                REFERENCE_MAX_P_ERROR_MW,
+                max_error,
+            ),
+            improved_over_reference=training_diagnostics.best_val_mse < REFERENCE_VAL_MSE,
+            best_phase=training_diagnostics.best_phase,
+            best_cycle_id=training_diagnostics.best_cycle_id,
+            best_global_step=training_diagnostics.best_global_step,
+            best_step=training_diagnostics.best_step,
+            final_phase=training_diagnostics.final_phase,
+            final_global_step=training_diagnostics.final_global_step,
+            final_step=training_diagnostics.final_step,
+            train_points=config.train_samples,
+            val_points=config.val_samples,
+            eval_points=config.eval_samples,
+        )
+    ]
+
+
+def build_architecture_comparison_summary(
+    error_rows: list[SurrogateErrorRow],
+    config: SurrogateTrainingConfig,
+    params: MLPParams,
+    training_diagnostics: TrainingDiagnostics,
+) -> list[ArchitectureComparisonSummaryRow]:
+    """Compare the current capacity run against the best width-8 reference."""
+
+    eval_abs_errors = np.asarray(
+        [row.p_abs_error_mw for row in error_rows if row.split == "eval"],
+        dtype=float,
+    )
+    if eval_abs_errors.size == 0:
+        eval_mae = float("nan")
+        eval_rmse = float("nan")
+        max_error = float("nan")
+    else:
+        eval_mae = float(np.mean(eval_abs_errors))
+        eval_rmse = float(np.sqrt(np.mean(eval_abs_errors**2)))
+        max_error = float(np.max(eval_abs_errors))
+
+    return [
+        ArchitectureComparisonSummaryRow(
+            reference_hidden_width=WIDTH8_REFERENCE_HIDDEN_WIDTH,
+            candidate_hidden_width=config.hidden_width,
+            reference_parameter_count=WIDTH8_REFERENCE_PARAMETER_COUNT,
+            candidate_parameter_count=count_mlp_parameters(params),
+            reference_val_mse=WIDTH8_REFERENCE_VAL_MSE,
+            reference_val_mae_mw=WIDTH8_REFERENCE_VAL_MAE_MW,
+            reference_eval_p_mae_mw=WIDTH8_REFERENCE_EVAL_P_MAE_MW,
+            reference_eval_p_rmse_mw=WIDTH8_REFERENCE_EVAL_P_RMSE_MW,
+            reference_max_p_error_mw=WIDTH8_REFERENCE_MAX_P_ERROR_MW,
+            candidate_best_val_mse=training_diagnostics.best_val_mse,
+            candidate_best_val_mae_mw=training_diagnostics.best_val_mae_mw,
+            candidate_eval_p_mae_mw=eval_mae,
+            candidate_eval_p_rmse_mw=eval_rmse,
+            candidate_max_p_error_mw=max_error,
+            relative_improvement_val_mse=_relative_improvement(
+                WIDTH8_REFERENCE_VAL_MSE,
+                training_diagnostics.best_val_mse,
+            ),
+            relative_improvement_val_mae=_relative_improvement(
+                WIDTH8_REFERENCE_VAL_MAE_MW,
+                training_diagnostics.best_val_mae_mw,
+            ),
+            relative_improvement_eval_p_mae=_relative_improvement(
+                WIDTH8_REFERENCE_EVAL_P_MAE_MW,
+                eval_mae,
+            ),
+            relative_improvement_eval_p_rmse=_relative_improvement(
+                WIDTH8_REFERENCE_EVAL_P_RMSE_MW,
+                eval_rmse,
+            ),
+            relative_improvement_max_p_error=_relative_improvement(
+                WIDTH8_REFERENCE_MAX_P_ERROR_MW,
+                max_error,
+            ),
+            improved_over_width8=training_diagnostics.best_val_mse
+            < WIDTH8_REFERENCE_VAL_MSE,
+            best_phase=training_diagnostics.best_phase,
+            best_cycle_id=training_diagnostics.best_cycle_id,
+            best_global_step=training_diagnostics.best_global_step,
+            train_points=config.train_samples,
+            val_points=config.val_samples,
+            eval_points=config.eval_samples,
+        )
+    ]
+
+
 def summarize_dataset(split: str, data: jnp.ndarray) -> TrainingDatasetSummaryRow:
     p_ref = _target_p_mw(data)
     return TrainingDatasetSummaryRow(
@@ -847,9 +1253,14 @@ def build_model_comparison(
                 train_points=config.train_samples,
                 val_points=config.val_samples,
                 eval_points=config.eval_samples,
+                best_phase=training_diagnostics.best_phase,
+                best_cycle_id=training_diagnostics.best_cycle_id,
+                best_global_step=training_diagnostics.best_global_step,
                 best_step=training_diagnostics.best_step,
                 best_val_mse=training_diagnostics.best_val_mse,
                 best_val_mae_mw=training_diagnostics.best_val_mae_mw,
+                final_phase=training_diagnostics.final_phase,
+                final_global_step=training_diagnostics.final_global_step,
                 final_step=training_diagnostics.final_step,
                 final_val_mse=training_diagnostics.final_val_mse,
                 final_val_mae_mw=training_diagnostics.final_val_mae_mw,
@@ -1294,7 +1705,13 @@ def write_metadata(
     config: SurrogateTrainingConfig,
     params: MLPParams,
     training_diagnostics: TrainingDiagnostics,
+    training_improvement_rows: list[TrainingImprovementSummaryRow],
+    architecture_comparison_rows: list[ArchitectureComparisonSummaryRow],
 ) -> None:
+    improvement = training_improvement_rows[0] if training_improvement_rows else None
+    architecture_comparison = (
+        architecture_comparison_rows[0] if architecture_comparison_rows else None
+    )
     meta = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_hash": _git_hash(),
@@ -1305,16 +1722,58 @@ def write_metadata(
         "replaced_element": PV_COUPLING_SGEN_NAME,
         "upstream_models": list(UPSTREAM_MODELS),
         "training_config": config._asdict(),
+        "training_variant": "two_phase_base_plus_warm_restart_finetune",
+        "checkpoint_resume_source": (
+            "No persisted width-16 parameter checkpoint is loaded. The capacity "
+            "run is initialized from scratch; Phase B starts from the in-process "
+            "best Phase-A validation checkpoint. Width-8 checkpoints are not "
+            "architecture-compatible and are not reused."
+        ),
+        "architecture_capacity_run": {
+            "reference_hidden_width": WIDTH8_REFERENCE_HIDDEN_WIDTH,
+            "candidate_hidden_width": config.hidden_width,
+            "hidden_layers": config.hidden_layers,
+            "activation": "tanh",
+            "width8_checkpoint_reused": False,
+            "candidate_initialized_from_scratch": True,
+            "architecture_comparison_summary": (
+                _to_native(asdict(architecture_comparison))
+                if architecture_comparison is not None
+                else {}
+            ),
+        },
         "learning_rate_schedule": {
             "schedule": config.lr_schedule,
-            "start": learning_rate_at_step(0, config),
-            "end": learning_rate_at_step(config.max_train_steps, config),
-            "configured_start": config.learning_rate_start,
-            "configured_end": config.learning_rate_end,
-            "max_train_steps": config.max_train_steps,
-            "cyclic": False,
+            "cyclic": bool(config.warm_restart_enabled),
+            "warm_restart_enabled": bool(config.warm_restart_enabled),
+            "initial_schedule": config.initial_schedule,
+            "initial_start": base_learning_rate_at_step(0, config),
+            "initial_end": base_learning_rate_at_step(config.base_train_steps, config),
+            "initial_learning_rate_start": config.initial_learning_rate_start,
+            "initial_learning_rate_end": config.initial_learning_rate_end,
+            "base_train_steps": config.base_train_steps,
+            "finetune_schedule": config.lr_schedule,
+            "finetune_steps": config.finetune_steps,
+            "restart_cycle_steps": list(config.restart_cycle_steps),
+            "restart_lr_max": list(config.restart_lr_max),
+            "restart_lr_min": list(config.restart_lr_min),
+            "restart_start_values": [
+                warm_restart_learning_rate_at_step(sum(config.restart_cycle_steps[:idx]), config)
+                for idx in range(len(config.restart_cycle_steps))
+            ],
+            "restart_end": warm_restart_learning_rate_at_step(config.finetune_steps, config),
         },
         "best_validation_checkpoint": asdict(training_diagnostics),
+        "reference_metrics": {
+            "reference_val_mse": REFERENCE_VAL_MSE,
+            "reference_val_mae_mw": REFERENCE_VAL_MAE_MW,
+            "reference_eval_p_mae_mw": REFERENCE_EVAL_P_MAE_MW,
+            "reference_eval_p_rmse_mw": REFERENCE_EVAL_P_RMSE_MW,
+            "reference_max_p_error_mw": REFERENCE_MAX_P_ERROR_MW,
+        },
+        "training_improvement_summary": (
+            _to_native(asdict(improvement)) if improvement is not None else {}
+        ),
         "dataset_sizes": {
             "train_points": config.train_samples,
             "val_points": config.val_samples,
@@ -1362,6 +1821,7 @@ def write_metadata(
             "P-only MLP; Q is fixed by kappa = -0.25.",
             "The neural model is a distillation surrogate, not a measured-data forecast model.",
             "No controller logic, no Q limits, no PV-to-PQ switching.",
+            "No gradient-matching loss and no architecture change in the warm-restart finetune.",
             "All upstream models use the same inject_pv_at_bus adapter and unchanged PF core.",
         ],
         "primary_metrics": [
@@ -1374,12 +1834,76 @@ def write_metadata(
     (results_dir / "metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def write_readme(results_dir: Path) -> None:
-    text = """# Experiment 4 - Modular Upstream Coupling with a Neural PQ Surrogate
+def write_readme(
+    results_dir: Path,
+    config: SurrogateTrainingConfig,
+    training_diagnostics: TrainingDiagnostics,
+    training_improvement_rows: list[TrainingImprovementSummaryRow],
+    architecture_comparison_rows: list[ArchitectureComparisonSummaryRow],
+) -> None:
+    improvement = training_improvement_rows[0] if training_improvement_rows else None
+    architecture = (
+        architecture_comparison_rows[0] if architecture_comparison_rows else None
+    )
+    if improvement is None:
+        comparison_text = "Training-improvement metrics were not available."
+    else:
+        comparison_text = f"""Against the 8000-step cosine-decay reference run
+(Val-MSE `{REFERENCE_VAL_MSE:.8g}`, Val-MAE
+`{REFERENCE_VAL_MAE_MW:.8g} MW`, Eval P-MAE
+`{REFERENCE_EVAL_P_MAE_MW:.8g} MW`, Eval P-RMSE
+`{REFERENCE_EVAL_P_RMSE_MW:.8g} MW`, Max P-error
+`{REFERENCE_MAX_P_ERROR_MW:.8g} MW`), the new best checkpoint is in phase
+`{improvement.best_phase}` at global step `{improvement.best_global_step}` with
+Val-MSE
+`{improvement.new_best_val_mse:.8g}` and Val-MAE
+`{improvement.new_best_val_mae_mw:.8g} MW`. The new eval split has P-MAE
+`{improvement.new_eval_p_mae_mw:.8g} MW`, P-RMSE
+`{improvement.new_eval_p_rmse_mw:.8g} MW`, and max P-error
+`{improvement.new_max_p_error_mw:.8g} MW`.
+
+Relative improvements are Val-MSE
+`{improvement.relative_improvement_val_mse:.6g}`, Val-MAE
+`{improvement.relative_improvement_val_mae:.6g}`, Eval P-MAE
+`{improvement.relative_improvement_eval_p_mae:.6g}`, Eval P-RMSE
+`{improvement.relative_improvement_eval_p_rmse:.6g}`, and Max P-error
+`{improvement.relative_improvement_max_p_error:.6g}`. Improved over reference:
+`{improvement.improved_over_reference}`."""
+
+    if architecture is None:
+        architecture_text = "Architecture-comparison metrics were not available."
+    else:
+        architecture_text = f"""This run increases only the MLP hidden width from
+`{architecture.reference_hidden_width}` to `{architecture.candidate_hidden_width}`.
+The width-8 reference has `{architecture.reference_parameter_count}` parameters;
+the width-16 candidate has `{architecture.candidate_parameter_count}` parameters.
+No width-8 checkpoint is reused because the parameter shapes are incompatible;
+the width-16 model is initialized and trained from scratch.
+
+Against the width-8 warm-restart reference (Val-MSE
+`{WIDTH8_REFERENCE_VAL_MSE:.8g}`, Val-MAE `{WIDTH8_REFERENCE_VAL_MAE_MW:.8g} MW`,
+Eval P-MAE `{WIDTH8_REFERENCE_EVAL_P_MAE_MW:.8g} MW`, Eval P-RMSE
+`{WIDTH8_REFERENCE_EVAL_P_RMSE_MW:.8g} MW`, Max P-error
+`{WIDTH8_REFERENCE_MAX_P_ERROR_MW:.8g} MW`), the width-16 candidate reaches
+Val-MSE `{architecture.candidate_best_val_mse:.8g}`, Val-MAE
+`{architecture.candidate_best_val_mae_mw:.8g} MW`, Eval P-MAE
+`{architecture.candidate_eval_p_mae_mw:.8g} MW`, Eval P-RMSE
+`{architecture.candidate_eval_p_rmse_mw:.8g} MW`, and max P-error
+`{architecture.candidate_max_p_error_mw:.8g} MW`.
+
+Relative improvements are Val-MSE
+`{architecture.relative_improvement_val_mse:.6g}`, Val-MAE
+`{architecture.relative_improvement_val_mae:.6g}`, Eval P-MAE
+`{architecture.relative_improvement_eval_p_mae:.6g}`, Eval P-RMSE
+`{architecture.relative_improvement_eval_p_rmse:.6g}`, and Max P-error
+`{architecture.relative_improvement_max_p_error:.6g}`. Improved over width 8:
+`{architecture.improved_over_width8}`."""
+
+    text = f"""# Experiment 4 - Modular Upstream Coupling with a Neural PQ Surrogate
 
 This experiment demonstrates that the differentiable AC power-flow core can be
 coupled to different upstream models through the same P/Q injection interface.
-It compares the analytical PV/weather model, a tiny JAX-only P-only MLP
+It compares the analytical PV/weather model, a small JAX-only P-only MLP
 surrogate, and a direct P/Q irradiance baseline.
 
 No Equinox, Flax, Optax, PyTorch, TensorFlow, controller logic, Q limits, or
@@ -1401,14 +1925,35 @@ independent random synthetic points. The training target is the analytical
 PV-weather teacher output `P_ref_mw / 2.0`; the NN remains a distillation
 surrogate, not a measured-data PV forecast model.
 
-The MLP has three inputs, two hidden layers of width 8 with `tanh`
+The MLP has three inputs, two hidden layers of width {config.hidden_width} with `tanh`
 activations, and one scalar normalized active-power output. Reactive power is
 not learned: it remains deterministically coupled as `Q = -0.25 * P`.
 
-Training uses full-batch gradient descent in JAX with a non-cyclic
-`cosine_decay` learning-rate schedule from `5e-2` to `5e-4` over the configured
-training steps. The exported comparison uses the best validation checkpoint
-rather than blindly using the last parameter vector.
+## Capacity run
+
+{architecture_text}
+
+Training uses full-batch gradient descent in JAX. Because no persisted
+parameter checkpoint existed for the previous run, this script uses a
+two-phase training variant: Phase A reproduces the 8000-step non-cyclic
+`cosine_decay` run from `{config.initial_learning_rate_start:.1e}` to
+`{config.initial_learning_rate_end:.1e}`. Phase B starts from the best Phase-A
+validation checkpoint and runs 8000 additional warm-restart finetune steps with
+four cosine cycles:
+
+- cycle 1: `2e-2 -> 5e-4` over 2000 steps
+- cycle 2: `1e-2 -> 2e-4` over 2000 steps
+- cycle 3: `5e-3 -> 1e-4` over 2000 steps
+- cycle 4: `2e-3 -> 5e-5` over 2000 steps
+
+The exported comparison uses the best global validation checkpoint over both
+phases rather than blindly using the final parameter vector. In this run the
+best checkpoint is phase `{training_diagnostics.best_phase}` at global step
+`{training_diagnostics.best_global_step}`.
+
+## Comparison to previous training run
+
+{comparison_text}
 
 The compact weather-case list used for `model_comparison`,
 `gradient_success_table`, and `sensitivity_pattern_summary` remains separate
@@ -1433,6 +1978,10 @@ comparisons intentionally small.
   errors, sign matches, and magnitude ratios versus `analytic_pv_weather`.
 - `sensitivity_error_summary.csv/json`: sensitivity error aggregates by model,
   observable, and weather input.
+- `training_improvement_summary.csv/json`: comparison against the 8000-step
+  cosine-decay reference NN-surrogate run.
+- `architecture_comparison_summary.csv/json`: width-8 versus width-16 capacity
+  comparison.
 - `run_summary.csv/json`: convergence summary by upstream model.
 """
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -1452,6 +2001,8 @@ def export_all(
     pf_error_summary_rows: list[PFObservableErrorSummaryRow],
     sensitivity_error_rows: list[SensitivityErrorRow],
     sensitivity_error_summary_rows: list[SensitivityErrorSummaryRow],
+    training_improvement_rows: list[TrainingImprovementSummaryRow],
+    architecture_comparison_rows: list[ArchitectureComparisonSummaryRow],
     summary_rows: list[RunSummaryRow],
     config: SurrogateTrainingConfig,
     params: MLPParams,
@@ -1503,10 +2054,38 @@ def export_all(
         SENSITIVITY_ERROR_SUMMARY_COLUMNS,
     )
     _write_json(results_dir / "sensitivity_error_summary.json", sensitivity_error_summary_rows)
+    _write_csv(
+        results_dir / "training_improvement_summary.csv",
+        training_improvement_rows,
+        TRAINING_IMPROVEMENT_SUMMARY_COLUMNS,
+    )
+    _write_json(results_dir / "training_improvement_summary.json", training_improvement_rows)
+    _write_csv(
+        results_dir / "architecture_comparison_summary.csv",
+        architecture_comparison_rows,
+        ARCHITECTURE_COMPARISON_SUMMARY_COLUMNS,
+    )
+    _write_json(
+        results_dir / "architecture_comparison_summary.json",
+        architecture_comparison_rows,
+    )
     _write_csv(results_dir / "run_summary.csv", summary_rows, RUN_SUMMARY_COLUMNS)
     _write_json(results_dir / "run_summary.json", summary_rows)
-    write_metadata(results_dir, config, params, training_diagnostics)
-    write_readme(results_dir)
+    write_metadata(
+        results_dir,
+        config,
+        params,
+        training_diagnostics,
+        training_improvement_rows,
+        architecture_comparison_rows,
+    )
+    write_readme(
+        results_dir,
+        config,
+        training_diagnostics,
+        training_improvement_rows,
+        architecture_comparison_rows,
+    )
 
 
 def run_experiment(
@@ -1523,6 +2102,8 @@ def run_experiment(
     list[PFObservableErrorSummaryRow],
     list[SensitivityErrorRow],
     list[SensitivityErrorSummaryRow],
+    list[TrainingImprovementSummaryRow],
+    list[ArchitectureComparisonSummaryRow],
     list[RunSummaryRow],
     MLPParams,
     TrainingDiagnostics,
@@ -1553,6 +2134,17 @@ def run_experiment(
         params,
         norm,
     )
+    training_improvement_rows = build_training_improvement_summary(
+        error_rows,
+        config,
+        training_diagnostics,
+    )
+    architecture_comparison_rows = build_architecture_comparison_summary(
+        error_rows,
+        config,
+        params,
+        training_diagnostics,
+    )
     return (
         dataset_rows,
         history_rows,
@@ -1565,6 +2157,8 @@ def run_experiment(
         pf_error_summary_rows,
         sensitivity_error_rows,
         sensitivity_error_summary_rows,
+        training_improvement_rows,
+        architecture_comparison_rows,
         summary_rows,
         params,
         training_diagnostics,
@@ -1589,6 +2183,8 @@ def main() -> None:
         pf_error_summary_rows,
         sensitivity_error_rows,
         sensitivity_error_summary_rows,
+        training_improvement_rows,
+        architecture_comparison_rows,
         summary_rows,
         params,
         training_diagnostics,
@@ -1606,6 +2202,8 @@ def main() -> None:
         pf_error_summary_rows,
         sensitivity_error_rows,
         sensitivity_error_summary_rows,
+        training_improvement_rows,
+        architecture_comparison_rows,
         summary_rows,
         config,
         params,

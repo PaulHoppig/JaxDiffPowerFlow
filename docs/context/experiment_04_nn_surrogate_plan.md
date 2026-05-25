@@ -42,16 +42,45 @@ als weitere Schnittstellenkontrolle, nicht als fachlich genaues PV-Modell.
 
 ## NN-Architektur und Training
 
-Das Hauptmodell ist ein P-only-MLP mit drei Eingaben, zwei versteckten Schichten
-der Breite 8, `tanh`-Aktivierungen und einer skalaren Ausgabe. Die Default-
-Konfiguration des Hauptlaufs verwendet 32768 Trainingspunkte, 8192
-Validierungspunkte und einen separaten 8192-Punkte-Evaluationssplit, einen
-festen Seed und einfaches Full-Batch-Gradient-Descent in JAX.
+Das aktuelle Hauptmodell ist ein P-only-MLP mit drei Eingaben, zwei
+versteckten Schichten der Breite 16, `tanh`-Aktivierungen und einer skalaren
+Ausgabe. Die Default-Konfiguration des Hauptlaufs verwendet 32768
+Trainingspunkte, 8192 Validierungspunkte und einen separaten
+8192-Punkte-Evaluationssplit, einen festen Seed und einfaches
+Full-Batch-Gradient-Descent in JAX.
 
-Das Training nutzt eine nicht-zyklische Cosine-Decay-Lernrate mit Startwert
-`5e-2`, Endwert `5e-4` und 4000 Trainingsschritten. Es werden die Parameter des
-besten Validation-MSE-Checkpoints fuer die finalen Surrogatfehler und den
-anschliessenden Power-Flow-Modellvergleich verwendet.
+Der dokumentierte Referenz-Hauptlauf nutzt eine nicht-zyklische
+Cosine-Decay-Lernrate mit Startwert `8e-2`, Endwert `1e-4` und 8000
+Trainingsschritten. Im aktualisierten Hauptlauf vom 2026-05-22 lag der beste
+Validation-Checkpoint am letzten Schritt `8000`; das Training war mit der
+hoeheren Start-Lernrate stabil.
+
+Der aktuelle Exp.-4-Tuninglauf nutzt einen zweiphasigen
+Warm-Restart-Finetune. Da kein persistierter Parametercheckpoint des
+8000-Schritt-Referenzlaufs existierte, fuehrt das Skript Phase A erneut im
+Prozess aus und startet Phase B aus dem besten Phase-A-Validation-Checkpoint.
+Phase A bleibt der 8000-Schritt-Cosine-Decay-Lauf `8e-2 -> 1e-4`. Phase B
+nutzt 8000 zusaetzliche Full-Batch-Schritte mit
+`cosine_warm_restarts_decay`:
+
+- Zyklus 1: `2e-2 -> 5e-4` ueber 2000 Schritte,
+- Zyklus 2: `1e-2 -> 2e-4` ueber 2000 Schritte,
+- Zyklus 3: `5e-3 -> 1e-4` ueber 2000 Schritte,
+- Zyklus 4: `2e-3 -> 5e-5` ueber 2000 Schritte.
+
+Das globale Best-Validation-Checkpointing laeuft ueber beide Phasen. Falls der
+Finetune schlechter waere, bliebe der beste Phase-A-Checkpoint final. Im
+Warm-Restart-Lauf vom 2026-05-22 gewinnt Phase B im vierten Zyklus bei global
+Step `16000`.
+
+Der aktuelle Modellkapazitaetslauf vom 2026-05-22 erhoeht ausschliesslich
+`hidden_width` von 8 auf 16. `hidden_layers = 2`, `tanh`, Wetterbereiche,
+Input-Normalisierung, Datensatzgroessen, Loss-Funktion, P-only-Ziel und
+`Q = -0.25 * P` bleiben unveraendert. Der Width-16-Lauf wird neu initialisiert
+und vollstaendig trainiert; ein Width-8-Checkpoint wird wegen inkompatibler
+Parameterformen nicht wiederverwendet. Die berechnete Parameterzahl steigt von
+113 auf 353. Der beste globale Validation-Checkpoint liegt erneut in Phase B,
+Zyklus 4, global Step `16000`.
 
 Kleine Smoke-Test-Konfigurationen in den Tests duerfen weiterhin deutlich
 weniger Punkte verwenden. Diese Mini-Konfigurationen pruefen nur Import,
@@ -98,6 +127,8 @@ Wesentliche Artefakte sind:
 - `sensitivity_pattern_summary.csv/json`,
 - `sensitivity_error_table.csv/json`,
 - `sensitivity_error_summary.csv/json`,
+- `training_improvement_summary.csv/json`,
+- `architecture_comparison_summary.csv/json`,
 - `run_summary.csv/json`,
 - `metadata.json`,
 - `README.md`.
@@ -125,13 +156,35 @@ Gradientenfehler, relative Gradientenfehler mit Nenner-Floor,
 Vorzeichenuebereinstimmung und Magnitudenverhaeltnisse gegen
 `analytic_pv_weather`.
 
+`training_improvement_summary` vergleicht den aktuellen Width-16-Lauf mit
+Phase-A/Warm-Restart-Finetune gegen den 8000-Schritt-Referenzlauf mit Val-MSE
+`2.565834826e-04`, Val-MAE `0.024622580 MW`, Eval P-MAE `0.024815085 MW`,
+Eval P-RMSE `0.032617826 MW` und maximalem P-Fehler `0.185804774 MW`. Der
+Width-16-Lauf erreicht Val-MSE `1.0796882754565427e-04`, Val-MAE
+`0.01641394628038067 MW`, Eval P-MAE `0.016544012227095853 MW`, Eval P-RMSE
+`0.021139486791535485 MW` und maximalen P-Fehler
+`0.11933011475462596 MW`.
+
+`architecture_comparison_summary` vergleicht den Width-16-Lauf gegen den
+bisher besten Width-8-Warm-Restart-Lauf mit Val-MSE `2.3189919622e-04`,
+Val-MAE `0.023338907 MW`, Eval P-MAE `0.023523218 MW`, Eval P-RMSE
+`0.031040266 MW` und maximalem P-Fehler `0.177669209 MW`. Relative
+Verbesserungen des Width-16-Kandidaten sind Val-MSE `0.5344148263`, Val-MAE
+`0.2967131545`, Eval P-MAE `0.2966943457`, Eval P-RMSE `0.3189656689` und
+maximaler P-Fehler `0.3283579331`.
+
 ## Bewusste Vereinfachungen
 
 Das NN ist kein grosses Prognosemodell und wird nicht auf Messdaten trainiert.
 Es ist ein kleiner Distillation-Surrogatnachweis fuer die Kopplungsmodularitaet.
 Das Modell gibt nur Wirkleistung frei aus; Blindleistung folgt deterministisch
 aus `kappa = -0.25`. Es gibt keine Spannungsregelung, keine Q-Limits, keine
-PV-PQ-Umschaltung und keine Controllerlogik.
+PV-PQ-Umschaltung und keine Controllerlogik. Der aktuelle
+Modellkapazitaetslauf aendert nur die MLP-Breite; Datensatzgroessen,
+Wetterbereiche, Input-Normalisierung, Loss-Funktion, analytisches PV-Modell,
+P/Q-Kopplung und Power-Flow-Kern bleiben unveraendert. Dies ist keine neue
+wissenschaftliche Fragestellung, sondern eine kontrollierte Verbesserung des
+NN-Surrogats innerhalb derselben Modellgrenzen.
 
 Die Aussage ist lokal und auf den dokumentierten Trainings- und
 Auswertungsbereich beschraenkt. Die Ergebnisqualitaet des NN darf daher nicht
