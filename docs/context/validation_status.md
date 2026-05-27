@@ -181,7 +181,7 @@ Q/P:               -0.25
 
 Der Baseline-Check entfernt das statische `sgen`, injiziert bei `G = 1000 W/m²` und `T_cell = 25 °C` dieselben P/Q-Werte über das JAX-kompatible Interface und vergleicht relevante Netzgrößen.
 
-## Validiert: Experiment 5a/5b Curtailment-Demonstrator
+## Validiert: Experiment 5a/5b/5c Curtailment-Demonstrator
 
 Umgesetzt und getestet:
 
@@ -191,16 +191,24 @@ Umgesetzt und getestet:
 - Experiment 5b optimiert den PV-Curtailment-Faktor fuer genau diesen
   Auswahlfall mit einer glatten Export-Penalty, Sigmoid-Parametrisierung und
   1D-Grid-Referenz.
+- Experiment 5c loest dieselbe Optimierungsaufgabe wie 5b, ersetzt aber den
+  analytischen PV-Wetterblock durch das trainierte NN-PV-Surrogat aus
+  Experiment 4. Da kein standalone Parametercheckpoint vorliegt, reproduziert
+  5c den deterministischen Exp.-4-Best-Validation-Checkpoint im Prozess.
 - Der volle-PV-Auswahlfall exportiert `7.599971 MW` und verletzt damit den
   demonstratorinternen Zielwert von `7.0 MW`.
 - Der zero-PV-Endpunkt exportiert `5.462384 MW`; der Zielwert ist im
   eindimensionalen Curtailment-Problem erreichbar.
 - Die finale Exp.-5b-Loesung erreicht `p_export_mw = 6.990006` bei
   `curtailment_factor = 0.714203`; die harte Exportverletzung ist `0.0 MW`.
+- Die finale Exp.-5c-Loesung erreicht `p_export_mw = 6.990006` bei
+  `curtailment_factor = 0.719208`; die harte Exportverletzung ist `0.0 MW`.
+  Die 1001-Punkte-Grid-Referenz liegt bei `c = 0.723000`.
 
 Diese Validierung ist demonstratorbezogen. Der Exportzielwert ist keine
 normative Netzcode-Grenze, und thermische Betriebsmittelgrenzwerte werden nicht
-bewertet.
+bewertet. Das NN in Exp. 5c ist ein synthetisches P-only-Distillation-Surrogat;
+`Q = -0.25 * P` bleibt deterministisch gekoppelt.
 
 ## Noch nicht vollständig validiert
 

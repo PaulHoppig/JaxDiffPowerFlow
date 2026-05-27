@@ -182,6 +182,45 @@ Dependencies. Zusaetzlich wird eine eindimensionale Grid-Referenz ueber
 Plausibilitaetscheck fuer dieses eindimensionale Demonstrationsproblem, nicht
 als skalierbarer Optimierer.
 
+## Experiment 5c: NN-PV-Curtailment-Optimierung
+
+Exp. 5c loest dieselbe Optimierungsaufgabe wie Exp. 5b fuer denselben
+ausgewaehlten Fall `selected_realistic_load0p4_g1200_t30`, ersetzt aber den
+vorgelagerten analytischen PV-Wetterblock durch das trainierte NN-PV-Surrogat
+aus Experiment 4.
+
+Unveraendert gegenueber Exp. 5b bleiben:
+
+- `p_export_limit_mw = 7.0`,
+- `p_export_target_mw = 6.99`,
+- `beta = 300`,
+- `lambda_curtailment = 1e-4`,
+- Sigmoid/Logit-Parametrisierung von `c in [0, 1]`,
+- lokal implementierter Adam-Loop,
+- 1001-Punkte-Grid-Referenz,
+- Definition von `p_export_mw`, `hard_export_violation_mw` und
+  `soft_export_violation_mw`.
+
+Die NN-Kopplung lautet:
+
+```text
+g_poa_wm2, t_amb_c, wind_ms
+    -> Exp.-4-NN-Surrogat
+    -> P_NN_mw
+P_pv_mw(c)    = c * P_NN_mw
+Q_pv_mvar(c) = -0.25 * P_pv_mw(c)
+```
+
+Da Experiment 4 aktuell keinen standalone Parametercheckpoint persistiert,
+reproduziert Exp. 5c den deterministischen Exp.-4-Trainingslauf im Prozess und
+verwendet die von `train_surrogate(..., return_diagnostics=True)`
+zurueckgegebenen besten globalen Validation-Parameter. Es werden keine
+zufaelligen oder untrainierten NN-Parameter verwendet.
+
+Der elektrische Kern bleibt unveraendert; Exp. 5c demonstriert nur, dass die
+gekoppelte Optimierung auch mit einem differenzierbaren NN-Upstream-Modell
+funktioniert.
+
 ## Artefakte
 
 Exp. 5a schreibt nach:
@@ -219,6 +258,38 @@ Wichtige Artefakte:
 - `metadata.json`,
 - `README.md`.
 
+Exp. 5c schreibt nach:
+
+```text
+experiments/results/exp05c_optimize_pv_curtailment_nn/
+```
+
+Wichtige Artefakte:
+
+- `selected_case_baseline.csv/json`,
+- `optimization_trace.csv/json`,
+- `final_solution.csv/json`,
+- `grid_reference.csv/json`,
+- `constraint_diagnostics.csv/json`,
+- `run_summary.csv/json`,
+- `metadata.json`,
+- `README.md`.
+
+Exp.-5c-Figuren werden separat geschrieben nach:
+
+```text
+experiments/results/exp05c_figures/
+```
+
+Artefakte:
+
+- `fig51_screening_export_overview.png/pdf`,
+- `fig53_export_before_after_reference.png/pdf`,
+- `fig54_grid_reference_export_vs_curtailment.png/pdf`,
+- `fig55_optimization_trace_export_and_curtailment.png/pdf`,
+- `README.md`,
+- `figure_metadata.json`.
+
 ## Aktueller Ergebnisstand
 
 Der ausgewaehlte 30-C-Fall verletzt bei voller PV den Zielwert:
@@ -249,6 +320,23 @@ Soft Violation     = 0.000162 MW
 Grid-Referenz c    = 0.718000
 ```
 
+Die finale Exp.-5c-Loesung mit NN-Upstream erreicht:
+
+```text
+curtailment_factor = 0.719208
+PV-Nutzung         = 71.9208 %
+PV-Abregelung      = 28.0792 %
+p_export_mw        = 6.990006
+Export-Margin      = 0.009994 MW
+Hard Violation     = 0.000000 MW
+Soft Violation     = 0.000162 MW
+Grid-Referenz c    = 0.723000
+```
+
+Die Werte unterscheiden sich leicht von Exp. 5b, weil das NN-Surrogat das
+analytische PV-Modell approximiert. Die Grid-Referenz wurde fuer Exp. 5c neu
+berechnet und nicht aus Exp. 5b kopiert.
+
 ## Grenzen
 
 Nicht enthalten sind:
@@ -260,5 +348,7 @@ Nicht enthalten sind:
 - Optimierung ueber mehrere Last- oder Wetterszenarien,
 - normative thermische Betriebsmittelgrenzwertbewertung.
 
-Alle kritischen Zustaende in Exp. 5a und der Exportzielwert in Exp. 5b sind
-demonstratorinterne Indikatoren.
+Alle kritischen Zustaende in Exp. 5a und der Exportzielwert in Exp. 5b/5c sind
+demonstratorinterne Indikatoren. Das NN in Exp. 5c ist ein synthetisches
+Distillation-Surrogat, kein Messdaten-Prognosemodell; es ist P-only und koppelt
+Q deterministisch ueber `Q = -0.25 * P`.

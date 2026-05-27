@@ -1,5 +1,117 @@
 # Changelog
 
+## 2026-05-26 - Experiment 5c NN-PV-Curtailment-Optimierung
+
+### Kurzbeschreibung
+- Neues Experiment 5c implementiert:
+  `experiments/exp05c_optimize_pv_curtailment_nn.py`.
+- Exp. 5c loest dieselbe Curtailment-Optimierung wie Exp. 5b fuer
+  `selected_realistic_load0p4_g1200_t30`, ersetzt aber den analytischen
+  PV-Wetterblock durch das trainierte NN-PV-Surrogat aus Experiment 4.
+- Exp. 5b bleibt unveraendert und schreibt weiterhin in den eigenen
+  Ergebnisordner. Exp. 5c schreibt separat nach
+  `experiments/results/exp05c_optimize_pv_curtailment_nn/`.
+- Da Experiment 4 aktuell keinen standalone Parametercheckpoint persistiert,
+  reproduziert Exp. 5c den deterministischen Exp.-4-Trainingslauf im Prozess
+  und nutzt die zurueckgegebenen besten globalen Validation-Parameter. Es
+  werden keine zufaelligen oder untrainierten NN-Gewichte verwendet.
+- Die NN-Kopplung ist P-only:
+  `P_pv_mw(c) = c * P_NN_mw`, `Q_pv_mvar(c) = -0.25 * P_pv_mw(c)`.
+- Der elektrische Kern, Residuen, Y-Bus, Solver und implizite
+  Differentiation bleiben unveraendert.
+
+### Neue/geaenderte Dateien
+- `experiments/exp05c_optimize_pv_curtailment_nn.py` - neues direkt
+  ausfuehrbares Exp.-5c-Skript mit NN-Upstream, Adam-Optimierung,
+  1001-Punkte-Grid-Referenz, Konsistenzchecks, Metadata und README.
+- `experiments/plot_exp05c_figures.py` - neue Plotpipeline fuer Exp.-5c-
+  Artefakte mit separatem Outputordner.
+- `tests/test_exp05c_optimize_pv_curtailment_nn_outputs.py` - Schema-,
+  Kopplungs- und Smoke-Tests fuer Exp. 5c.
+- `tests/test_exp05c_plot_outputs.py` - Plot-Smoke-Tests fuer Exp. 5c.
+- `docs/context/experiment_05_plan.md` - Exp. 5c, NN-Kopplung, Artefakte und
+  Ergebnisstand dokumentiert.
+- `docs/context/experiment_plan.md` - Exp. 5c in den Experiment-5-Ausbau
+  aufgenommen.
+- `docs/context/validation_status.md` - Exp.-5c-Ergebnisse als validierter
+  Curtailment-Demonstrator dokumentiert.
+- `docs/context/known_limitations.md` - Grenzen von Exp. 5c und
+  NN-Surrogatquelle ergaenzt.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Neue Artefakte
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/selected_case_baseline.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/optimization_trace.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/final_solution.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/grid_reference.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/constraint_diagnostics.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/run_summary.csv/json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/metadata.json`
+- `experiments/results/exp05c_optimize_pv_curtailment_nn/README.md`
+- `experiments/results/exp05c_figures/fig51_screening_export_overview.png/pdf`
+- `experiments/results/exp05c_figures/fig53_export_before_after_reference.png/pdf`
+- `experiments/results/exp05c_figures/fig54_grid_reference_export_vs_curtailment.png/pdf`
+- `experiments/results/exp05c_figures/fig55_optimization_trace_export_and_curtailment.png/pdf`
+- `experiments/results/exp05c_figures/README.md`
+- `experiments/results/exp05c_figures/figure_metadata.json`
+
+### Ergebnisnotizen
+- Voller Exp.-5c-Lauf erfolgreich mit dem `.venv`-Interpreter:
+  `python experiments/exp05c_optimize_pv_curtailment_nn.py`.
+- Plot-Pipeline erfolgreich aus vorhandenen Exp.-5c-Artefakten ausgefuehrt:
+  `python experiments/plot_exp05c_figures.py`.
+- Reproduzierter Exp.-4-NN-Checkpoint: Phase `warm_restart_finetune`, Zyklus
+  `4`, global Step `16000`, Val-MSE `1.0796882754565435e-04`,
+  Val-MAE `0.01641394628038067 MW`.
+- Exp.-5c Full-PV-Export: `7.579483241033376 MW`.
+- Exp.-5c Zero-PV-Export: `5.476903803760313 MW`; damit ist die harte
+  7-MW-Grenze im eindimensionalen Curtailment-Problem erreichbar.
+- Finale Exp.-5c-Loesung:
+  `final_curtailment_factor = 0.7192083240661113`,
+  `final_p_export_mw = 6.990005686429702`,
+  `final_export_margin_mw = 0.009994313570297564`,
+  `final_hard_export_violation_mw = 0.0`,
+  `final_soft_export_violation_mw = 0.00016222774170722822`.
+- Grid-Referenz: `grid_best_curtailment_factor = 0.723`; Abstand Optimierer
+  vs. Grid: `0.0037916759338886274`.
+- Optionaler Vergleich zu Exp. 5b aus vorhandenen Artefakten:
+  Exp. 5b nutzt `c = 0.7142034114138576` bei
+  `p_export_mw = 6.990005680657161`; Exp. 5c nutzt wegen NN-Approximation
+  etwas mehr PV-Nutzung (`c = 0.7192083240661113`) bei praktisch gleichem
+  Exportziel.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05c_optimize_pv_curtailment_nn_outputs.py -q`
+  (`8 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05c_plot_outputs.py -q`
+  (`3 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05b_optimize_pv_curtailment_outputs.py -q`
+  (`9 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05_plot_outputs.py -q`
+  (`5 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp04_modular_surrogate_outputs.py -q`
+  (`17 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_pq_surrogate_model.py -q`
+  (`8 passed`).
+
+### Bekannte Einschraenkungen
+- Exp. 5c ist kein OPF und optimiert nur einen ausgewaehlten Betriebspunkt.
+- Der 7-MW-Exportzielwert ist demonstratorintern und kein normativer
+  Netzcode-Grenzwert.
+- Das NN ist ein synthetisches Distillation-Surrogat und kein
+  Messdaten-Prognosemodell.
+- Das NN ist P-only; `Q = -0.25 * P` bleibt deterministisch gekoppelt.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Kein neuer standalone Exp.-4-Parametercheckpoint; Exp. 5c reproduziert den
+  deterministischen Best-Validation-Checkpoint im Prozess.
+
 ## 2026-05-22 - Experiment 4 Modellkapazitaetslauf mit hidden_width = 16
 
 ### Kurzbeschreibung

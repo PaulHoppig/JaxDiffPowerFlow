@@ -118,7 +118,7 @@ Die Gradientenvalidierung zeigt numerische Konsistenz gegenüber Finite Differen
 - sehr große Netze,
 - stark nichtlineare oder nichtglatte Upstream-Modelle.
 
-## Grenzen von Experiment 5a/5b
+## Grenzen von Experiment 5a/5b/5c
 
 Experiment 5a ist Screening und Fallauswahl, keine Optimierung. Der zusaetzliche
 30-C-Auswahlfall ist ein separates Add-on und veraendert den 48-Fall-
@@ -129,6 +129,14 @@ Exportzielwert von `7.0 MW` ist ein demonstratorinterner Zielwert fuer die
 Bachelorarbeits-Story, keine normative Netzcode-Grenze. Die Optimierung nutzt
 einen glatten Export-Proxy `-p_slack_mw`; berichtet wird weiterhin
 `p_export_mw = max(0, -p_slack_mw)`.
+
+Experiment 5c optimiert denselben Betriebspunkt mit demselben Ziel und derselben
+Optimierungslogik, nutzt aber das trainierte NN-PV-Surrogat aus Experiment 4
+als Upstream-Modell. Das NN ist ein synthetisches Distillation-Surrogat und
+kein Messdaten-Prognosemodell. Es ist P-only; Blindleistung bleibt
+deterministisch als `Q = -0.25 * P` gekoppelt. Weil Experiment 4 aktuell keinen
+standalone Parametercheckpoint persistiert, reproduziert Exp. 5c den
+deterministischen Best-Validation-Checkpoint im Prozess.
 
 Nicht enthalten sind weiterhin:
 
