@@ -44,30 +44,30 @@ OBSERVABLE_ORDER = (
 )
 
 LABELS = {
-    "base": "Base",
-    "load_high": "High load",
-    "sgen_high": "High static generator",
-    "load_scale_mv_bus_2": "Load scale MV Bus 2",
-    "sgen_scale_static_generator": "Static generator scale",
-    "shunt_q_scale": "Shunt Q scale",
-    "trafo_x_scale": "Transformer x scale",
+    "base": "Basis",
+    "load_high": "Hohe Last",
+    "sgen_high": "Hohe Einspeisung",
+    "load_scale_mv_bus_2": "Lastskalierung MV-Bus 2",
+    "sgen_scale_static_generator": "Skalierung statischer Generator",
+    "shunt_q_scale": "Shunt-Q-Skalierung",
+    "trafo_x_scale": "Trafo-X-Skalierung",
     "vm_mv_bus_2_pu": "|V| MV Bus 2",
-    "p_slack_mw": "Slack P",
-    "total_p_loss_mw": "Total P loss",
-    "p_trafo_hv_mw": "Transformer HV P",
+    "p_slack_mw": "Slack-P",
+    "total_p_loss_mw": "Wirkleistungsverluste gesamt",
+    "p_trafo_hv_mw": "Trafo-HV-P",
 }
 
 COMPARISON_INPUT_LABELS = {
-    "load_scale_mv_bus_2": "Load scale",
-    "sgen_scale_static_generator": "sgen scale",
-    "shunt_q_scale": "Shunt Q scale",
-    "trafo_x_scale": "Trafo X scale",
+    "load_scale_mv_bus_2": "Lastskalierung",
+    "sgen_scale_static_generator": "sgen-Skalierung",
+    "shunt_q_scale": "Shunt-Q-Skalierung",
+    "trafo_x_scale": "Trafo-X-Skalierung",
 }
 COMPARISON_OUTPUT_LABELS = {
     "vm_mv_bus_2_pu": "|V| MV Bus 2",
-    "p_slack_mw": "Slack P",
-    "total_p_loss_mw": "Total P loss",
-    "p_trafo_hv_mw": "Trafo HV P",
+    "p_slack_mw": "Slack-P",
+    "total_p_loss_mw": "Wirkleistungsverluste",
+    "p_trafo_hv_mw": "Trafo-HV-P",
 }
 
 GRADIENT_REQUIRED_COLUMNS = {
@@ -437,7 +437,7 @@ def build_error_heatmap_figure(
         linewidth=0.7,
     )
     cbar = fig.colorbar(mesh, ax=ax, pad=0.025)
-    cbar.set_label("log10(max relative error)")
+    cbar.set_label("log10(max. relativer Fehler)")
 
     ax.set_xticks(np.arange(len(inputs)))
     ax.set_yticks(np.arange(len(observables)))
@@ -448,13 +448,8 @@ def build_error_heatmap_figure(
         rotation_mode="anchor",
     )
     ax.set_yticklabels([prettify_label(name) for name in observables])
-    ax.set_xlabel("Input parameter")
-    ax.set_ylabel("Output observable")
-    ax.set_title(
-        "Experiment 2: max AD-vs-FD relative gradient error",
-        fontsize=11,
-        pad=12,
-    )
+    ax.set_xlabel("Eingangsparameter")
+    ax.set_ylabel("Ausgangsgröße")
     ax.set_xlim(-0.5, len(inputs) - 0.5)
     ax.set_ylim(len(observables) - 0.5, -0.5)
     ax.tick_params(axis="both", which="both", length=0)
@@ -505,18 +500,12 @@ def build_gradient_magnitude_vs_relative_error_figure(
         sharey=True,
         constrained_layout=True,
     )
-    fig.suptitle(
-        "Experiment 2: Gradient magnitude versus relative AD-vs-FD error",
-        fontsize=12,
-    )
-
     _draw_comparison_heatmap(
         fig=fig,
         ax=axes[0],
         matrix=left_matrix,
         annotation_values=left_values,
-        panel_title="Gradient magnitude",
-        colorbar_label="log10(median |AD gradient|)",
+        colorbar_label="log10(Median |AD-Gradient|)",
         cmap="viridis_r",
     )
     _draw_comparison_heatmap(
@@ -524,8 +513,7 @@ def build_gradient_magnitude_vs_relative_error_figure(
         ax=axes[1],
         matrix=right_matrix,
         annotation_values=right_values,
-        panel_title="Relative gradient error",
-        colorbar_label="log10(max relative error)",
+        colorbar_label="log10(max. relativer Fehler)",
         cmap="viridis",
     )
 
@@ -569,7 +557,6 @@ def _draw_comparison_heatmap(
     ax: plt.Axes,
     matrix: np.ndarray,
     annotation_values: np.ndarray,
-    panel_title: str,
     colorbar_label: str,
     cmap: str,
 ) -> None:
@@ -587,7 +574,6 @@ def _draw_comparison_heatmap(
     cbar = fig.colorbar(mesh, ax=ax, pad=0.025)
     cbar.set_label(colorbar_label)
 
-    ax.set_title(panel_title, fontsize=10, pad=10)
     ax.set_xticks(np.arange(len(INPUT_ORDER)))
     ax.set_yticks(np.arange(len(OBSERVABLE_ORDER)))
     ax.set_xticklabels(
@@ -597,8 +583,8 @@ def _draw_comparison_heatmap(
         rotation_mode="anchor",
     )
     ax.set_yticklabels([COMPARISON_OUTPUT_LABELS[name] for name in OBSERVABLE_ORDER])
-    ax.set_xlabel("Input parameter")
-    ax.set_ylabel("Output observable")
+    ax.set_xlabel("Eingangsparameter")
+    ax.set_ylabel("Ausgangsgröße")
     ax.set_xlim(-0.5, len(INPUT_ORDER) - 0.5)
     ax.set_ylim(len(OBSERVABLE_ORDER) - 0.5, -0.5)
     ax.tick_params(axis="both", which="both", length=0)
@@ -1074,10 +1060,9 @@ def plot_fd_step_study_detailed(
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_ylim(bottom=1e-15)
-    ax.set_title("Gradientenfehler in Abhängigkeit der FD-Schrittweite")
     ax.set_xlabel("Schrittweite $h$")
     ax.set_ylabel(r"Relativer Fehler $\epsilon_\mathrm{rel}$ (AD vs. FD)")
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=True)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
     return save_figure(fig, output_dir, "fig08_fd_step_study_detailed")

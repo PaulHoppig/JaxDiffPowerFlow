@@ -159,7 +159,7 @@ def test_sensitivity_heatmap_unit_transforms(plot_module):
     np.testing.assert_allclose(t_grid.to_numpy(), raw_grid.to_numpy() * 1000.0)
     assert np.isfinite(g_grid.to_numpy(dtype=float)).all()
     assert np.isfinite(t_grid.to_numpy(dtype=float)).all()
-    assert "kW per 100" in g_label
+    assert "kW je 100" in g_label
     assert g_unit == "kW per 100 W/m^2"
     assert "kW/" in t_label
     assert t_unit == "kW/degC"
@@ -299,10 +299,12 @@ def test_g_sweep_plot_labels_contain_expected_terms(plot_module, tmp_path, monke
     try:
         forward_ax = captured[0][1]
         sensitivity_ax = captured[1][1]
-        assert "G_poa" in forward_ax.get_xlabel()
-        assert "P_slack" in forward_ax.get_ylabel()
-        assert "G_poa" in sensitivity_ax.get_xlabel()
-        assert "dP_slack/dG_poa" in sensitivity_ax.get_ylabel()
+        assert "Einstrahlung" in forward_ax.get_xlabel()
+        assert "G_{poa}" in forward_ax.get_xlabel()
+        assert "Slack-Wirkleistung" in forward_ax.get_ylabel()
+        assert "Einstrahlung" in sensitivity_ax.get_xlabel()
+        assert "G_{poa}" in sensitivity_ax.get_xlabel()
+        assert r"\partial P_{slack}" in sensitivity_ax.get_ylabel()
     finally:
         for fig, _, _ in captured:
             plot_module.plt.close(fig)

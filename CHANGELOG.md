@@ -1,5 +1,107 @@
 # Changelog
 
+## 2026-06-08 - Experiment 5d einfache quadratische Export-Zielfunktion
+
+### Kurzbeschreibung
+- Neues Experiment 5d implementiert:
+  `experiments/exp05d_optimize_pv_curtailment_simple_objective.py`.
+- Exp. 5d loest dieselbe eindimensionale PV-Curtailment-Aufgabe wie Exp. 5b
+  fuer `selected_realistic_load0p4_g1200_t30` mit demselben analytischen
+  PV-Wettermodell und demselben AC-Power-Flow-Kern.
+- Der Unterschied zu Exp. 5b ist ausschliesslich die Zielfunktion:
+  `J(theta) = ((p_export_proxy(theta) - 7.0) / p_scale_mw) ** 2`, mit
+  `p_export_proxy = -p_slack_mw`, `p_scale_mw = 1.0` und
+  `c(theta) = sigmoid(theta)`.
+- Exp. 5d enthaelt keine Softplus-Penalty, kein 6.99-MW-Ziel, keine
+  Curtailment-Regularisierung und keinen `lambda_curtailment`-Term.
+- Exp. 5b bleibt unveraendert und schreibt weiterhin nach
+  `experiments/results/exp05b_optimize_pv_curtailment/`. Exp. 5d schreibt
+  separat nach
+  `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/`.
+
+### Neue/geaenderte Dateien
+- `experiments/exp05d_optimize_pv_curtailment_simple_objective.py` - neues
+  direkt ausfuehrbares Exp.-5d-Skript mit einfacher Objective, Adam-Loop,
+  1001-Punkte-Grid-Referenz, Konsistenzchecks, Metadata und README.
+- `experiments/plot_exp05d_figures.py` - neue Plotpipeline fuer Exp.-5d-
+  Artefakte mit separatem Outputordner und ohne 6.99-MW-Ziellinie.
+- `tests/test_exp05d_simple_objective_outputs.py` - Schema-, Objective- und
+  Smoke-Tests fuer Exp. 5d.
+- `tests/test_exp05d_plot_outputs.py` - Plot-Smoke-Tests fuer Exp. 5d.
+- `docs/context/experiment_05_plan.md` - Exp. 5d, Objective und Ergebnisstand
+  dokumentiert.
+- `docs/context/experiment_plan.md` - Exp. 5d in den Experiment-5-Ausbau
+  aufgenommen.
+- `docs/context/validation_status.md` - Exp.-5d-Ergebnisse als validierte
+  einfache Zielwertsuche dokumentiert.
+- `docs/context/known_limitations.md` - Grenzen von Exp. 5d ergaenzt.
+- `CHANGELOG.md` - dieser Eintrag.
+
+### Neue Artefakte
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/selected_case_baseline.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/optimization_trace.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/final_solution.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/grid_reference.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/constraint_diagnostics.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/run_summary.csv/json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/metadata.json`
+- `experiments/results/exp05d_optimize_pv_curtailment_simple_objective/README.md`
+- `experiments/results/exp05d_figures/fig51_screening_export_overview.png/pdf`
+- `experiments/results/exp05d_figures/fig53_export_before_after_reference.png/pdf`
+- `experiments/results/exp05d_figures/fig54_grid_reference_export_vs_curtailment.png/pdf`
+- `experiments/results/exp05d_figures/fig55_optimization_trace_export_and_curtailment.png/pdf`
+- `experiments/results/exp05d_figures/README.md`
+- `experiments/results/exp05d_figures/figure_metadata.json`
+
+### Ergebnisnotizen
+- Voller Exp.-5d-Lauf erfolgreich:
+  `python experiments/exp05d_optimize_pv_curtailment_simple_objective.py`.
+- Plot-Pipeline erfolgreich aus vorhandenen Exp.-5d-Artefakten ausgefuehrt:
+  `python experiments/plot_exp05d_figures.py`.
+- Exp.-5d Full-PV-Export: `7.6144414198533354 MW`.
+- Exp.-5d Zero-PV-Export: `5.476903803760313 MW`; damit ist die
+  7-MW-Zielmarke im eindimensionalen Curtailment-Problem erreichbar.
+- Finale Exp.-5d-Loesung:
+  `final_curtailment_factor = 0.7121007257421481`,
+  `final_p_export_mw = 7.000000018580143`,
+  `final_export_margin_mw = -1.8580142757684825e-08`,
+  `final_hard_export_violation_mw = 1.8580142757684825e-08`,
+  `final_objective = 3.4522170489594787e-16`.
+- Grid-Referenz:
+  `grid_best_objective_curtailment_factor = 0.712`,
+  `grid_best_feasible_curtailment_factor = 0.712`,
+  `abs_c_difference_optimizer_vs_grid_objective = 0.00010072574214814445`.
+- Optionaler Vergleich zu Exp. 5b aus vorhandenen Artefakten:
+  Exp. 5b nutzt `c = 0.7142034114138576` bei
+  `p_export_mw = 6.990005680657161`; Exp. 5d trifft die 7.0-MW-Marke
+  symmetrisch und liegt deshalb naeher an der Grenze.
+
+### Tests
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05d_simple_objective_outputs.py -q`
+  (`12 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05d_plot_outputs.py -q`
+  (`4 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05b_optimize_pv_curtailment_outputs.py -q`
+  (`9 passed`).
+- Ausgefuehrt:
+  `python -m pytest tests/test_exp05_plot_outputs.py -q`
+  (`5 passed`).
+
+### Bekannte Einschraenkungen
+- Exp. 5d ist kein OPF und optimiert nur einen ausgewaehlten Betriebspunkt.
+- Die einfache Objective ist eine Zielwertsuche auf 7.0 MW und keine harte
+  Ungleichungsoptimierung; ein sehr kleines Ueber- oder Unterschreiten der
+  7.0-MW-Linie ist deshalb erwartbar.
+- `soft_export_violation_mw` bleibt als `NaN` im Schema erhalten und gehoert
+  nicht zur Exp.-5d-Zielfunktion.
+- Der 7-MW-Wert ist demonstratorintern und kein normativer Netzcode-Grenzwert.
+- Keine Controllerlogik, keine Q-Limits, keine PV-PQ-Umschaltung und keine
+  echte PV-Bus-Spannungsregelung.
+- Keine normative thermische Betriebsmittelbewertung.
+
 ## 2026-05-26 - Experiment 5c NN-PV-Curtailment-Optimierung
 
 ### Kurzbeschreibung

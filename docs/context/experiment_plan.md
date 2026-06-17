@@ -289,7 +289,8 @@ Empfohlen:
 
 **Status: umgesetzt** - siehe `experiments/exp05a_network_screening.py`,
 `experiments/exp05b_optimize_pv_curtailment.py`,
-`experiments/exp05c_optimize_pv_curtailment_nn.py` und
+`experiments/exp05c_optimize_pv_curtailment_nn.py`,
+`experiments/exp05d_optimize_pv_curtailment_simple_objective.py` und
 `docs/context/experiment_05_plan.md`.
 
 ### Ziel
@@ -338,8 +339,12 @@ Empfohlen:
 ### Aktueller Ausbau
 
 Exp. 5a liefert Screening und Fallauswahl. Exp. 5b optimiert den ausgewaehlten
-30-C-Hoch-PV-Fall mit dem analytischen PV-Wettermodell. Exp. 5c wiederholt
-dieselbe Optimierungsaufgabe mit dem trainierten NN-PV-Surrogat aus Experiment
-4 als Upstream-Modell. In allen Varianten bleibt der elektrische Kern
-unveraendert; die PV wird als P/Q-Einspeisung am Kopplungsbus modelliert.
+30-C-Hoch-PV-Fall mit dem analytischen PV-Wettermodell und der komplexeren
+Target-/Penalty-Zielfunktion. Exp. 5c wiederholt dieselbe Optimierungsaufgabe
+mit dem trainierten NN-PV-Surrogat aus Experiment 4 als Upstream-Modell.
+Exp. 5d nutzt wieder das analytische PV-Wettermodell, ersetzt aber die
+Zielfunktion bewusst durch die einfache quadratische Zielwertsuche
+`((p_export_proxy - 7.0) / p_scale_mw)^2`. In allen Varianten bleibt der
+elektrische Kern unveraendert; die PV wird als P/Q-Einspeisung am
+Kopplungsbus modelliert.
 

@@ -33,9 +33,9 @@ SWEEP_T_AMB_TICKS = (5, 15, 25, 35, 45, 55)
 GRID_G_POA_TICKS = (200, 400, 600, 800, 1000)
 GRID_T_AMB_TICKS = (5, 15, 25, 35, 45)
 G_SWEEP_TICKS = (200, 400, 600, 800, 1000)
-SLACK_SIGN_NOTE = "negative = export to upstream grid"
-SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $_v{wind} = 2 m/s$"
-G_SWEEP_FIXED_WEATHER_LABEL = r"$T_{amb} = 25^\circ$C, wind = 2 m/s"
+SLACK_SIGN_NOTE = "Negative Werte bedeuten Export in das vorgelagerte Netz."
+SWEEP_FIXED_WEATHER_LABEL = r"$G_{poa} = 800$ W/m$^2$, $v_{wind} = 2$ m/s"
+G_SWEEP_FIXED_WEATHER_LABEL = r"$T_{amb} = 25^\circ$C, Wind = 2 m/s"
 
 SCENARIO_GRID_REQUIRED_COLUMNS = {
     "network_scenario",
@@ -116,9 +116,9 @@ def _plot_export(fig, stem: str, figures_dir: Path) -> tuple[Path, Path]:
 
 def _scenario_label(scenario: str) -> str:
     labels = {
-        "base": "Base",
-        "load_low": "Low load",
-        "load_high": "High load",
+        "base": "Basis",
+        "load_low": "Niedrige Last",
+        "load_high": "Hohe Last",
     }
     return labels.get(scenario, scenario)
 
@@ -391,13 +391,13 @@ def sensitivity_heatmap_plot_grid(
     if input_parameter == "g_poa_wm2":
         return (
             raw_grid.astype(float) * 1000.0 * 100.0,
-            r"dP_slack / dG [kW per 100 W/m$^2$]",
+            r"$\partial P_\mathrm{slack} / \partial G_\mathrm{poa}$ [kW je 100 W/m$^2$]",
             "kW per 100 W/m^2",
         )
     if input_parameter == "t_amb_c":
         return (
             raw_grid.astype(float) * 1000.0,
-            r"dP_slack / dT_amb [kW/$^\circ$C]",
+            r"$\partial P_\mathrm{slack} / \partial T_\mathrm{amb}$ [kW/$^\circ$C]",
             "kW/degC",
         )
     raise ValueError(f"Unsupported sensitivity heatmap input_parameter: {input_parameter!r}")
@@ -433,9 +433,8 @@ def plot_sensitivity_heatmap(
     cbar.set_label(colorbar_label)
     ax.set_xticks(g_values)
     ax.set_yticks(t_values)
-    ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
-    ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
-    ax.set_title(title, fontsize=10)
+    ax.set_xlabel(r"Einstrahlung in Modulebene $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"Umgebungstemperatur $T_{amb}$ [$^\circ$C]")
     fig.tight_layout(rect=(0.0, 0.02, 1.0, 1.0))
     fig.savefig(output_png, dpi=200, bbox_inches="tight")
     fig.savefig(output_pdf, bbox_inches="tight")
@@ -498,10 +497,10 @@ def plot_fig08_heatmap_g_t_sensitivity_p_slack_combined(
 
     fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.8), constrained_layout=True)
     panels = (
-        (axes[0], grid_g, "Irradiance sensitivity", label_g),
-        (axes[1], grid_t, "Ambient-temperature sensitivity", label_t),
+        (axes[0], grid_g, label_g),
+        (axes[1], grid_t, label_t),
     )
-    for ax, grid, title, colorbar_label in panels:
+    for ax, grid, colorbar_label in panels:
         g_values = [float(value) for value in grid.columns]
         t_values = [float(value) for value in grid.index]
         mesh = ax.pcolormesh(
@@ -516,11 +515,8 @@ def plot_fig08_heatmap_g_t_sensitivity_p_slack_combined(
         cbar.set_label(colorbar_label)
         ax.set_xticks(g_values)
         ax.set_yticks(t_values)
-        ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
-        ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
-        ax.set_title(title, fontsize=10)
-
-    fig.suptitle("Slack-P sensitivities over weather grid", fontsize=11)
+        ax.set_xlabel(r"Einstrahlung in Modulebene $G_{poa}$ [W/m$^2$]")
+        ax.set_ylabel(r"Umgebungstemperatur $T_{amb}$ [$^\circ$C]")
     figures_dir.mkdir(parents=True, exist_ok=True)
     stem = "fig08_heatmap_g_t_sensitivity_p_slack_combined"
     png_path = figures_dir / f"{stem}.png"
@@ -553,10 +549,9 @@ def plot_fig01_t_amb_sweep_p_slack(
         )
 
     ax.set_xticks(SWEEP_T_AMB_TICKS)
-    ax.set_xlabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
-    ax.set_ylabel("Slack active power $P_{slack}$ [MW]")
-    ax.set_title(SWEEP_FIXED_WEATHER_LABEL, fontsize=10)
-    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.set_xlabel(r"Umgebungstemperatur $T_{amb}$ [$^\circ$C]")
+    ax.set_ylabel(r"Slack-Wirkleistung $P_{slack}$ [MW]")
+    ax.legend(title="Szenario", fontsize=8, title_fontsize=9, frameon=True)
     ax.grid(True, alpha=0.3)
     ax.text(
         0.01,
@@ -591,12 +586,11 @@ def plot_fig02_heatmap_g_t_p_slack_base(
         linewidth=0.55,
     )
     cbar = fig.colorbar(mesh, ax=ax)
-    cbar.set_label("Slack active power $P_{slack}$ [MW]")
+    cbar.set_label(r"Slack-Wirkleistung $P_{slack}$ [MW]")
     ax.set_xticks(GRID_G_POA_TICKS)
     ax.set_yticks(GRID_T_AMB_TICKS)
-    ax.set_xlabel(r"Plane-of-array irradiance $G_{poa}$ [W/m$^2$]")
-    ax.set_ylabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
-    ax.set_title("Base scenario: Slack active power over weather grid", fontsize=10)
+    ax.set_xlabel(r"Einstrahlung in Modulebene $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"Umgebungstemperatur $T_{amb}$ [$^\circ$C]")
     ax.text(
         0.01,
         -0.20,
@@ -642,13 +636,9 @@ def plot_fig03_sensitivity_p_slack_vs_t_amb(
         ax.set_ylim(float(np.nanmin(y_values)) - pad, float(np.nanmax(y_values)) + pad)
 
     ax.set_xticks(SWEEP_T_AMB_TICKS)
-    ax.set_xlabel(r"Ambient temperature $T_{amb}$ [$^\circ$C]")
+    ax.set_xlabel(r"Umgebungstemperatur $T_{amb}$ [$^\circ$C]")
     ax.set_ylabel(r"$\partial P_{slack} / \partial T_{amb}$ [kW/$^\circ$C]")
-    ax.set_title(
-        r"Local AD sensitivity at $G_{poa} = 800$ W/m$^2$, wind = 2 m/s",
-        fontsize=10,
-    )
-    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.legend(title="Szenario", fontsize=8, title_fontsize=9, frameon=True)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     return _plot_export(fig, "fig03_sensitivity_p_slack_vs_t_amb", figures_dir)
@@ -676,9 +666,8 @@ def plot_g_sweep_p_slack(
         )
 
     ax.set_xticks(G_SWEEP_TICKS)
-    ax.set_xlabel("Plane-of-array irradiance G_poa [W/m^2]")
-    ax.set_ylabel("Slack active power P_slack [MW]")
-    ax.set_title("Slack active power over irradiance sweep", fontsize=10)
+    ax.set_xlabel(r"Einstrahlung in Modulebene $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"Slack-Wirkleistung $P_{slack}$ [MW]")
     ax.text(
         0.99,
         -0.22,
@@ -697,7 +686,7 @@ def plot_g_sweep_p_slack(
         va="top",
         fontsize=8,
     )
-    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.legend(title="Szenario", fontsize=8, title_fontsize=9, frameon=True)
     ax.grid(True, alpha=0.3)
     fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
     return list(_plot_export(fig, "fig04_g_sweep_p_slack", figures_dir))
@@ -727,9 +716,8 @@ def plot_g_sweep_p_slack_sensitivity(
         )
 
     ax.set_xticks(G_SWEEP_TICKS)
-    ax.set_xlabel("Plane-of-array irradiance G_poa [W/m^2]")
-    ax.set_ylabel("dP_slack/dG_poa [kW/(W/m^2)]")
-    ax.set_title("Local AD sensitivity over irradiance sweep", fontsize=10)
+    ax.set_xlabel(r"Einstrahlung in Modulebene $G_{poa}$ [W/m$^2$]")
+    ax.set_ylabel(r"$\partial P_{slack} / \partial G_{poa}$ [kW/(W/m$^2$)]")
     ax.text(
         0.99,
         -0.18,
@@ -739,7 +727,7 @@ def plot_g_sweep_p_slack_sensitivity(
         va="top",
         fontsize=8,
     )
-    ax.legend(title="Scenario", fontsize=8, title_fontsize=9, frameon=False)
+    ax.legend(title="Szenario", fontsize=8, title_fontsize=9, frameon=True)
     ax.grid(True, alpha=0.3)
     if all_y:
         ax.set_ylim(*padded_limits(all_y, pad_fraction=0.15))

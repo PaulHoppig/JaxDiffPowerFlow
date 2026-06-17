@@ -75,7 +75,7 @@ def test_selected_case_and_optimizer_settings_match_exp05b(exp_module):
     assert config["wind_ms"] == pytest.approx(2.0)
     assert config["upstream_model"] == "nn_p_only_fixed_kappa"
     assert config["p_export_limit_mw"] == pytest.approx(7.0)
-    assert config["p_export_target_mw"] == pytest.approx(6.99)
+    assert config["p_export_target_mw"] == pytest.approx(7.0)
     assert exp_module.BETA == pytest.approx(exp_module.exp05b.BETA)
     assert exp_module.LAMBDA_CURTAILMENT == pytest.approx(
         exp_module.exp05b.LAMBDA_CURTAILMENT

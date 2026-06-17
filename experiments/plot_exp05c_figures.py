@@ -32,7 +32,7 @@ FIGURES_DIR = Path(__file__).resolve().parent / "results" / "exp05c_figures"
 FIGURE_STEMS = exp05_plot.FIGURE_STEMS
 SELECTED_CASE_ID = exp05_plot.SELECTED_CASE_ID
 EXPORT_LIMIT_MW = exp05_plot.EXPORT_LIMIT_MW
-EXPORT_TARGET_MW = exp05_plot.EXPORT_TARGET_MW
+EXPORT_TARGET_MW = 7.0
 
 
 def _git_hash() -> str:

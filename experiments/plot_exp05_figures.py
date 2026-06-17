@@ -42,6 +42,7 @@ SELECTED_CASE_ID = "selected_realistic_load0p4_g1200_t30"
 EXPORT_LIMIT_MW = 7.0
 EXPORT_TARGET_MW = 6.99
 PNG_DPI = 300
+EXPORT_TARGET_LABEL = "Exportziel 7.0 MW"
 
 FIGURE_STEMS = (
     "fig51_screening_export_overview",
@@ -267,7 +268,7 @@ def plot_fig51(
             s=38,
             edgecolor="white",
             linewidth=0.5,
-            label="Screening-Faelle",
+            label="Screening-Fälle",
         )
         cbar = fig.colorbar(scatter, ax=ax, pad=0.015)
         cbar.set_label(r"Einstrahlung $G_{poa}$ [W/m$^2$]")
@@ -280,7 +281,7 @@ def plot_fig51(
             color="#4c78a8",
             edgecolor="white",
             linewidth=0.5,
-            label="Screening-Faelle",
+            label="Screening-Fälle",
         )
 
     selected_mask = combined["plot_kind"] == "selected"
@@ -297,10 +298,10 @@ def plot_fig51(
         edgecolor="black",
         linewidth=0.8,
         zorder=4,
-        label="ausgewaehlter 30 degC-Fall",
+        label=r"ausgewählter 30-$^\circ$C-Fall",
     )
     ax.annotate(
-        "selected 30 degC case",
+        r"ausgewählter 30-$^\circ$C-Fall",
         xy=(sel["plot_index"], sel["p_export_mw"]),
         xytext=(8, 12),
         textcoords="offset points",
@@ -313,9 +314,8 @@ def plot_fig51(
         color="#b2182b",
         linestyle="--",
         linewidth=1.4,
-        label="7.0-MW-Grenze",
+        label=EXPORT_TARGET_LABEL,
     )
-    ax.set_title("Abb. 5.1: Screening-Export ueber Betriebspunkte")
     ax.set_xlabel("Betriebspunkte, nach Export sortiert")
     ax.set_ylabel(r"Exportleistung $p_{export}$ [MW]")
     ax.set_xlim(0.2, len(combined) + 0.8)
@@ -379,14 +379,15 @@ def plot_fig53(
     fig, ax = plt.subplots(figsize=(7.2, 4.4))
     x = np.arange(len(labels))
     bars = ax.bar(x, exports, color=colors, width=0.62, edgecolor="0.2", linewidth=0.7)
-    ax.axhline(limit_mw, color="#b2182b", linestyle="--", linewidth=1.4, label="7.0-MW-Grenze")
-    ax.axhline(
-        target_mw,
-        color="#b2182b",
-        linestyle=":",
-        linewidth=1.1,
-        label="Optimierungsziel 6.99 MW",
-    )
+    ax.axhline(limit_mw, color="#b2182b", linestyle="--", linewidth=1.4, label=EXPORT_TARGET_LABEL)
+    if abs(target_mw - limit_mw) > 1e-9:
+        ax.axhline(
+            target_mw,
+            color="#b2182b",
+            linestyle=":",
+            linewidth=1.1,
+            label=f"Exportziel {target_mw:.2f} MW",
+        )
     for bar, export, c_value in zip(bars, exports, c_values, strict=True):
         ax.text(
             bar.get_x() + bar.get_width() / 2.0,
@@ -396,7 +397,6 @@ def plot_fig53(
             va="bottom",
             fontsize=8.5,
         )
-    ax.set_title("Abb. 5.3: Export vor und nach Curtailment-Optimierung")
     ax.set_ylabel(r"Exportleistung $p_{export}$ [MW]")
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
@@ -443,18 +443,19 @@ def plot_fig54(
         linewidth=1.8,
         label="Grid-Referenzkurve",
     )
-    ax.axhline(limit_mw, color="#b2182b", linestyle="--", linewidth=1.4, label="7.0-MW-Grenze")
-    ax.axhline(
-        target_mw,
-        color="#b2182b",
-        linestyle=":",
-        linewidth=1.1,
-        label="Optimierungsziel 6.99 MW",
-    )
-    ax.scatter([opt_c], [opt_export], color="#1b9e77", s=70, zorder=4, label="Optimizer")
+    ax.axhline(limit_mw, color="#b2182b", linestyle="--", linewidth=1.4, label=EXPORT_TARGET_LABEL)
+    if abs(target_mw - limit_mw) > 1e-9:
+        ax.axhline(
+            target_mw,
+            color="#b2182b",
+            linestyle=":",
+            linewidth=1.1,
+            label=f"Exportziel {target_mw:.2f} MW",
+        )
+    ax.scatter([opt_c], [opt_export], color="#1b9e77", s=70, zorder=4, label="Optimierer")
     ax.scatter([grid_c], [grid_export], color="#7570b3", s=70, zorder=4, label="Grid-Referenz")
     ax.annotate(
-        f"Optimizer: c = {opt_c:.3f}",
+        f"Optimierer: c = {opt_c:.3f}",
         xy=(opt_c, opt_export),
         xytext=(-90, -35),
         textcoords="offset points",
@@ -469,7 +470,6 @@ def plot_fig54(
         fontsize=8.5,
         arrowprops={"arrowstyle": "->", "lw": 0.8, "color": "0.25"},
     )
-    ax.set_title("Abb. 5.4: Grid-Referenz fuer Export ueber PV-Nutzungsfaktor")
     ax.set_xlabel("PV-Nutzungsfaktor c [-]")
     ax.set_ylabel(r"Exportleistung $p_{export}$ [MW]")
     ax.set_xlim(0.0, 1.0)
@@ -522,15 +522,16 @@ def plot_fig55(
         color="#b2182b",
         linestyle="--",
         linewidth=1.3,
-        label="7.0-MW-Grenze",
+        label=EXPORT_TARGET_LABEL,
     )
-    ax_export.axhline(
-        target_mw,
-        color="#b2182b",
-        linestyle=":",
-        linewidth=1.0,
-        label="Optimierungsziel 6.99 MW",
-    )
+    if abs(target_mw - limit_mw) > 1e-9:
+        ax_export.axhline(
+            target_mw,
+            color="#b2182b",
+            linestyle=":",
+            linewidth=1.0,
+            label=f"Exportziel {target_mw:.2f} MW",
+        )
     ax_export.scatter(
         [final["iteration"]],
         [final["p_export_mw"]],
@@ -546,7 +547,6 @@ def plot_fig55(
         fontsize=8.5,
         arrowprops={"arrowstyle": "->", "lw": 0.8, "color": "0.25"},
     )
-    ax_export.set_title("Abb. 5.5: Verlauf der Curtailment-Optimierung")
     ax_export.set_ylabel(r"Exportleistung $p_{export}$ [MW]")
     ax_export.legend(loc="best", frameon=True)
 

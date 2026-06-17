@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,11 +72,12 @@ WIND_MS = exp05b.WIND_MS
 PV_SIZE_FACTOR = exp05b.PV_SIZE_FACTOR
 KAPPA = exp05b.KAPPA
 P_EXPORT_LIMIT_MW = exp05b.P_EXPORT_LIMIT_MW
-P_EXPORT_TARGET_MW = exp05b.P_EXPORT_TARGET_MW
+P_EXPORT_TARGET_MW = 7.0
 
 C_MIN = exp05b.C_MIN
 C_MAX = exp05b.C_MAX
-C_INIT = exp05b.C_INIT
+C_INIT = 1.0
+BOUNDARY_START_EPS = 1e-3
 LEARNING_RATE = exp05b.LEARNING_RATE
 MAX_ITER = exp05b.MAX_ITER
 ADAM_BETA1 = exp05b.ADAM_BETA1
@@ -136,6 +137,14 @@ def logit(curtailment_factor: float, eps: float = 1e-12) -> float:
     return exp05b.logit(curtailment_factor, eps=eps)
 
 
+def _optimizer_initial_c(c_init: float) -> float:
+    if c_init >= C_MAX:
+        return C_MAX - BOUNDARY_START_EPS
+    if c_init <= C_MIN:
+        return C_MIN + BOUNDARY_START_EPS
+    return c_init
+
+
 def curtailment_from_theta(theta: float | jnp.ndarray) -> jnp.ndarray:
     return exp05b.curtailment_from_theta(theta)
 
@@ -148,6 +157,7 @@ def selected_case_config() -> dict:
         {
             "upstream_model": UPSTREAM_MODEL_NAME,
             "nn_parameter_source": NN_PARAMETER_SOURCE_KIND,
+            "p_export_target_mw": P_EXPORT_TARGET_MW,
         }
     )
     return config_dict
@@ -405,12 +415,13 @@ def _objective_components(
     norm: WeatherInputNormalization,
     objective_grad=None,
     evaluator=None,
+    display_c: float | None = None,
 ) -> dict:
     objective_grad = objective_grad or _make_objective_grad(scenario, nn_params, norm)
     evaluator = evaluator or _make_case_evaluator(scenario, nn_params, norm)
     theta_jnp = jnp.asarray(theta, dtype=jnp.float64)
     objective, grad = objective_grad(theta_jnp)
-    curtailment = float(curtailment_from_theta(theta_jnp))
+    curtailment = float(display_c) if display_c is not None else float(curtailment_from_theta(theta_jnp))
     row = _solve_at_curtailment(
         scenario,
         nn_params,
@@ -421,6 +432,13 @@ def _objective_components(
     export_proxy = -row["p_slack_mw"]
     hard_violation = hard_export_violation_mw(float(export_proxy))
     soft_violation = soft_export_violation_mw(float(export_proxy))
+    if display_c is not None:
+        target_error = float(export_proxy) - P_EXPORT_TARGET_MW
+        objective = (
+            (target_error / P_SCALE_MW) ** 2
+            + (soft_violation / P_SCALE_MW) ** 2
+            + LAMBDA_CURTAILMENT * (1.0 - curtailment) ** 2
+        )
     return {
         "theta": theta,
         "curtailment_factor": curtailment,
@@ -504,13 +522,14 @@ def run_optimizer(
     learning_rate: float = LEARNING_RATE,
     c_init: float = C_INIT,
 ) -> list[OptimizationTraceRow]:
-    theta = logit(c_init)
+    theta = logit(_optimizer_initial_c(c_init))
     m = 0.0
     v = 0.0
     objective_grad = _make_objective_grad(scenario, nn_params, norm)
     evaluator = _make_case_evaluator(scenario, nn_params, norm)
     trace: list[OptimizationTraceRow] = []
     for iteration in range(max_iter + 1):
+        display_c = c_init if iteration == 0 and c_init in (C_MIN, C_MAX) else None
         values = _objective_components(
             theta,
             scenario,
@@ -518,6 +537,7 @@ def run_optimizer(
             norm,
             objective_grad,
             evaluator,
+            display_c,
         )
         trace.append(
             OptimizationTraceRow(
@@ -615,7 +635,13 @@ def build_final_solution(
     trace_rows: list[OptimizationTraceRow],
     grid_best: GridReferenceRow,
 ) -> list[FinalSolutionRow]:
-    return exp05b.build_final_solution(trace_rows, grid_best)
+    final_rows = exp05b.build_final_solution(trace_rows, grid_best)
+    return [
+        replace(
+            final_rows[0],
+            p_export_target_mw=P_EXPORT_TARGET_MW,
+        )
+    ]
 
 
 def build_run_summary(

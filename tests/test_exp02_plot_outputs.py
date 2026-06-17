@@ -170,12 +170,12 @@ def test_plot_module_is_importable(plot_module):
 
 
 def test_prettify_label_maps_known_names(plot_module):
-    assert plot_module.prettify_label("load_scale_mv_bus_2") == "Load scale MV Bus 2"
+    assert plot_module.prettify_label("load_scale_mv_bus_2") == "Lastskalierung MV-Bus 2"
     assert plot_module.prettify_label("sgen_scale_static_generator") == (
-        "Static generator scale"
+        "Skalierung statischer Generator"
     )
     assert plot_module.prettify_label("vm_mv_bus_2_pu") == "|V| MV Bus 2"
-    assert plot_module.prettify_label("p_trafo_hv_mw") == "Transformer HV P"
+    assert plot_module.prettify_label("p_trafo_hv_mw") == "Trafo-HV-P"
 
 
 def test_safe_log10_handles_zero_values(plot_module):
@@ -202,11 +202,11 @@ def test_heatmap_figure_has_report_labels(plot_module):
     fig, ax = plot_module.build_error_heatmap_figure(_sample_gradient_df())
 
     try:
-        assert ax.get_title() == "Experiment 2: max AD-vs-FD relative gradient error"
-        assert ax.get_xlabel() == "Input parameter"
-        assert ax.get_ylabel() == "Output observable"
+        assert ax.get_title() == ""
+        assert ax.get_xlabel() == "Eingangsparameter"
+        assert ax.get_ylabel() == "Ausgangsgröße"
         colorbar_labels = [axis.get_ylabel() for axis in fig.axes[1:]]
-        assert "log10(max relative error)" in colorbar_labels
+        assert "log10(max. relativer Fehler)" in colorbar_labels
     finally:
         plot_module.plt.close(fig)
 
@@ -269,11 +269,11 @@ def test_gradient_magnitude_vs_error_figure_has_two_heatmaps_and_colorbars(
 
     try:
         assert len(axes) == 2
-        assert axes[0].get_title() == "Gradient magnitude"
-        assert axes[1].get_title() == "Relative gradient error"
+        assert axes[0].get_title() == ""
+        assert axes[1].get_title() == ""
         colorbar_labels = [axis.get_ylabel() for axis in fig.axes[2:]]
-        assert "log10(median |AD gradient|)" in colorbar_labels
-        assert "log10(max relative error)" in colorbar_labels
+        assert "log10(Median |AD-Gradient|)" in colorbar_labels
+        assert "log10(max. relativer Fehler)" in colorbar_labels
     finally:
         plot_module.plt.close(fig)
 

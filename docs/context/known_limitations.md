@@ -118,7 +118,7 @@ Die Gradientenvalidierung zeigt numerische Konsistenz gegenüber Finite Differen
 - sehr große Netze,
 - stark nichtlineare oder nichtglatte Upstream-Modelle.
 
-## Grenzen von Experiment 5a/5b/5c
+## Grenzen von Experiment 5a/5b/5c/5d
 
 Experiment 5a ist Screening und Fallauswahl, keine Optimierung. Der zusaetzliche
 30-C-Auswahlfall ist ein separates Add-on und veraendert den 48-Fall-
@@ -137,6 +137,14 @@ kein Messdaten-Prognosemodell. Es ist P-only; Blindleistung bleibt
 deterministisch als `Q = -0.25 * P` gekoppelt. Weil Experiment 4 aktuell keinen
 standalone Parametercheckpoint persistiert, reproduziert Exp. 5c den
 deterministischen Best-Validation-Checkpoint im Prozess.
+
+Experiment 5d optimiert denselben Betriebspunkt mit dem analytischen
+PV-Wettermodell, nutzt aber bewusst nur die einfache Zielwert-Objective
+`((p_export_proxy - 7.0) / p_scale_mw)^2`. Es gibt keine Softplus-Penalty, kein
+6.99-MW-Ziel und keine Curtailment-Regularisierung. Dadurch ist Exp. 5d als
+symmetrische Zielwertsuche zu interpretieren, nicht als harte
+Ungleichungsoptimierung. Sehr kleine Ueber- oder Unterschreitungen der
+7.0-MW-Linie sind deshalb kein Widerspruch zur Methode.
 
 Nicht enthalten sind weiterhin:
 

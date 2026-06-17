@@ -200,7 +200,7 @@ def _add_training_phase_markers(ax: plt.Axes, frame: pd.DataFrame) -> None:
                 linestyle="--",
                 linewidth=1.0,
                 alpha=0.75,
-                label="Phase boundary" if "Phase boundary" not in ax.get_legend_handles_labels()[1] else None,
+                label="Phasengrenze" if "Phasengrenze" not in ax.get_legend_handles_labels()[1] else None,
             )
     if "cycle_id" in frame.columns:
         cycles = pd.to_numeric(frame["cycle_id"], errors="coerce").to_numpy()
@@ -233,17 +233,16 @@ def _plot_metric_curve(
         frame["step"],
         frame["train"],
         linewidth=1.8,
-        label=f"Train (final={_format_metric(final_train)})",
+        label=f"Training (final={_format_metric(final_train)})",
     )
     ax.plot(
         frame["step"],
         frame["validation"],
         linewidth=1.8,
-        label=f"Validation (final={_format_metric(final_val)})",
+        label=f"Validierung (final={_format_metric(final_val)})",
     )
 
-    ax.set_title(title, pad=12)
-    ax.set_xlabel("Training step")
+    ax.set_xlabel("Trainingsschritt")
     ax.set_ylabel(y_label)
     if use_log_y:
         ax.set_yscale("log")
@@ -266,7 +265,7 @@ def plot_training_loss_curve(
         train_column=train_column,
         val_column=val_column,
         title="Experiment 4: NN Surrogate Training Loss",
-        y_label="MSE loss",
+        y_label="MSE-Loss",
     )
     png_path, pdf_path = _save_figure(fig, "fig01_training_loss_curve", figures_dir)
     return png_path, pdf_path, use_log_y, final_train, final_val
@@ -324,11 +323,10 @@ def plot_learning_rate_schedule(
         frame["step"],
         frame["learning_rate"],
         linewidth=1.8,
-        label="Learning rate",
+        label="Lernrate",
     )
-    ax.set_title("Experiment 4: Learning-Rate Schedule", pad=12)
-    ax.set_xlabel("Training step")
-    ax.set_ylabel("Learning rate")
+    ax.set_xlabel("Trainingsschritt")
+    ax.set_ylabel("Lernrate")
     if use_log_y:
         ax.set_yscale("log")
     _add_training_phase_markers(ax, frame)
@@ -369,8 +367,7 @@ def plot_architecture_comparison(
     fig, ax = plt.subplots(figsize=(7.6, 4.6))
     ax.bar(x - width / 2, ref_values, width, label=f"width {ref_width}")
     ax.bar(x + width / 2, cand_values, width, label=f"width {cand_width}")
-    ax.set_title("Experiment 4: Architecture Comparison", pad=12)
-    ax.set_ylabel("Metric value")
+    ax.set_ylabel("Metrikwert")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right")
     if should_use_log_y(pd.Series(ref_values), pd.Series(cand_values)):

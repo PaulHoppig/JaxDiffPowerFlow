@@ -221,6 +221,46 @@ Der elektrische Kern bleibt unveraendert; Exp. 5c demonstriert nur, dass die
 gekoppelte Optimierung auch mit einem differenzierbaren NN-Upstream-Modell
 funktioniert.
 
+## Experiment 5d: einfache quadratische Export-Zielwertsuche
+
+Exp. 5d loest wiederum dieselbe eindimensionale Curtailment-Aufgabe fuer den
+ausgewaehlten Fall `selected_realistic_load0p4_g1200_t30` und nutzt wie Exp. 5b
+das analytische PV-Wettermodell. Die verschachtelte Struktur bleibt:
+
+```text
+theta -> sigmoid(theta) -> c -> P_pv(c), Q_pv(c)
+    -> AC-Power-Flow -> p_slack_mw -> p_export_proxy -> objective
+```
+
+Der Unterschied zu Exp. 5b ist ausschliesslich die Zielfunktion:
+
+```text
+p_export_proxy = -p_slack_mw
+p_scale_mw = 1.0
+objective = ((p_export_proxy - 7.0) / p_scale_mw) ** 2
+```
+
+Exp. 5d enthaelt keine Softplus-Penalty, kein 6.99-MW-Ziel, keine
+Curtailment-Regularisierung und keinen `lambda_curtailment`-Term. Die Groesse
+`p_export_mw = max(0, -p_slack_mw)` bleibt eine reine Reporting-Groesse.
+`soft_export_violation_mw` wird aus Schema-Kompatibilitaetsgruenden als `NaN`
+exportiert und gehoert nicht zur Zielfunktion.
+
+Die einfache Zielfunktion ist als symmetrische Zielwertsuche auf 7.0 MW zu
+interpretieren, nicht als harte einseitige Ungleichungsoptimierung. Deshalb
+kann das finale Ergebnis numerisch sehr knapp oberhalb oder unterhalb der
+7.0-MW-Linie liegen.
+
+Die 1001-Punkte-Grid-Referenz weist zwei Referenzen aus:
+
+- `grid_best_objective_curtailment_factor`: Grid-Punkt mit minimaler einfacher
+  Zielfunktion.
+- `grid_best_feasible_curtailment_factor`: groesster Grid-Punkt mit
+  `p_export_mw <= 7.0 MW`, sofern vorhanden.
+
+Diese Werte koennen leicht unterschiedlich sein, weil die erste Referenz eine
+symmetrische Zielwertsuche ist und die zweite eine einseitige Grenzreferenz.
+
 ## Artefakte
 
 Exp. 5a schreibt nach:
@@ -275,6 +315,23 @@ Wichtige Artefakte:
 - `metadata.json`,
 - `README.md`.
 
+Exp. 5d schreibt nach:
+
+```text
+experiments/results/exp05d_optimize_pv_curtailment_simple_objective/
+```
+
+Wichtige Artefakte:
+
+- `selected_case_baseline.csv/json`,
+- `optimization_trace.csv/json`,
+- `final_solution.csv/json`,
+- `grid_reference.csv/json`,
+- `constraint_diagnostics.csv/json`,
+- `run_summary.csv/json`,
+- `metadata.json`,
+- `README.md`.
+
 Exp.-5c-Figuren werden separat geschrieben nach:
 
 ```text
@@ -290,9 +347,25 @@ Artefakte:
 - `README.md`,
 - `figure_metadata.json`.
 
+Exp.-5d-Figuren werden separat geschrieben nach:
+
+```text
+experiments/results/exp05d_figures/
+```
+
+Artefakte:
+
+- `fig51_screening_export_overview.png/pdf`,
+- `fig53_export_before_after_reference.png/pdf`,
+- `fig54_grid_reference_export_vs_curtailment.png/pdf`,
+- `fig55_optimization_trace_export_and_curtailment.png/pdf`,
+- `README.md`,
+- `figure_metadata.json`.
+
 ## Aktueller Ergebnisstand
 
-Der ausgewaehlte 30-C-Fall verletzt bei voller PV den Zielwert:
+Die vorhandenen Exp.-5b-Artefakte berichten fuer den ausgewaehlten 30-C-Fall
+bei voller PV:
 
 ```text
 p_export_mw = 7.599971
@@ -301,7 +374,7 @@ p_pv_mw     = 2.146286
 q_pv_mvar   = -0.536571
 ```
 
-Bei `c = 0.0` ist die Grenze erreichbar:
+Bei `c = 0.0` ist die Grenze in diesen Exp.-5b-Artefakten erreichbar:
 
 ```text
 p_export_mw = 5.462384
@@ -337,6 +410,25 @@ Die Werte unterscheiden sich leicht von Exp. 5b, weil das NN-Surrogat das
 analytische PV-Modell approximiert. Die Grid-Referenz wurde fuer Exp. 5c neu
 berechnet und nicht aus Exp. 5b kopiert.
 
+Die finale Exp.-5d-Loesung mit einfacher quadratischer Zielwertsuche erreicht:
+
+```text
+Full-PV-Export     = 7.6144414198533354 MW
+Zero-PV-Export     = 5.476903803760313 MW
+curtailment_factor = 0.7121007257421481
+PV-Nutzung         = 71.2101 %
+PV-Abregelung      = 28.7899 %
+p_export_mw        = 7.000000018580143
+Export-Margin      = -0.0000000185801428 MW
+Hard Violation     = 0.0000000185801428 MW
+Objective          = 3.4522170489594787e-16
+Grid objective c   = 0.712000
+Grid feasible c    = 0.712000
+```
+
+Gegenueber Exp. 5b liegt Exp. 5d erwartbar naeher an der 7.0-MW-Linie, weil
+kein 6.99-MW-Ziel und keine Softplus-Sicherheitsmarge verwendet wird.
+
 ## Grenzen
 
 Nicht enthalten sind:
@@ -348,7 +440,8 @@ Nicht enthalten sind:
 - Optimierung ueber mehrere Last- oder Wetterszenarien,
 - normative thermische Betriebsmittelgrenzwertbewertung.
 
-Alle kritischen Zustaende in Exp. 5a und der Exportzielwert in Exp. 5b/5c sind
-demonstratorinterne Indikatoren. Das NN in Exp. 5c ist ein synthetisches
+Alle kritischen Zustaende in Exp. 5a und der Exportzielwert in Exp. 5b/5c/5d
+sind demonstratorinterne Indikatoren. Das NN in Exp. 5c ist ein synthetisches
 Distillation-Surrogat, kein Messdaten-Prognosemodell; es ist P-only und koppelt
-Q deterministisch ueber `Q = -0.25 * P`.
+Q deterministisch ueber `Q = -0.25 * P`. Exp. 5d ist eine bewusst einfache
+Zielwertsuche und keine harte Grenzoptimierung.
